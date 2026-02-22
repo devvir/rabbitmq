@@ -37,6 +37,78 @@ export class Exchange {
   }
 
   /**
+   * Checks if the exchange is configured as durable.
+   *
+   * @returns true if exchange is durable, false otherwise
+   */
+  isDurable(): boolean {
+    return this.spec.durable !== false;
+  }
+
+  /**
+   * Checks if the exchange is configured to auto-delete.
+   *
+   * @returns true if exchange auto-deletes, false otherwise
+   */
+  autoDeletes(): boolean {
+    return this.spec.autoDelete === true;
+  }
+
+  /**
+   * Gets the exchange type.
+   *
+   * @returns Exchange type: 'direct', 'topic', 'fanout', or 'headers'
+   */
+  getType(): string {
+    return this.spec.type || 'direct';
+  }
+
+  /**
+   * Checks if this is a topic exchange.
+   *
+   * @returns true if exchange type is 'topic'
+   */
+  isTopicExchange(): boolean {
+    return this.getType() === 'topic';
+  }
+
+  /**
+   * Checks if this is a direct exchange.
+   *
+   * @returns true if exchange type is 'direct'
+   */
+  isDirectExchange(): boolean {
+    return this.getType() === 'direct';
+  }
+
+  /**
+   * Checks if this is a fanout exchange.
+   *
+   * @returns true if exchange type is 'fanout'
+   */
+  isFanoutExchange(): boolean {
+    return this.getType() === 'fanout';
+  }
+
+  /**
+   * Checks if this is a headers exchange.
+   *
+   * @returns true if exchange type is 'headers'
+   */
+  isHeadersExchange(): boolean {
+    return this.getType() === 'headers';
+  }
+
+  /**
+   * Gets the alternate exchange if configured.
+   *
+   * @returns Alternate exchange name, or undefined if not configured
+   */
+  getAlternateExchange(): string | undefined {
+    return this.spec.alternateExchange;
+  }
+
+  /**
    * Asserts the exchange exists with the configured specification.
    * Creates it if it doesn't exist.
    *

@@ -36,6 +36,73 @@ export class Queue {
   }
 
   /**
+   * Checks if the queue is configured as durable.
+   *
+   * @returns true if queue is durable, false otherwise
+   */
+  isDurable(): boolean {
+    return this.spec.durable !== false;
+  }
+
+  /**
+   * Checks if the queue is configured to auto-delete.
+   *
+   * @returns true if queue auto-deletes, false otherwise
+   */
+  autoDeletes(): boolean {
+    return this.spec.autoDelete === true;
+  }
+
+  /**
+   * Checks if the queue is exclusive to this connection.
+   *
+   * @returns true if queue is exclusive, false otherwise
+   */
+  isExclusive(): boolean {
+    return this.spec.exclusive === true;
+  }
+
+  /**
+   * Gets the routing keys this queue is bound to.
+   * Note: This only tracks routing keys from the initial spec;
+   * additional bindings made via bindToExchange() are not tracked.
+   *
+   * @returns Array of routing keys, or empty array if none specified
+   */
+  getBindingRoutingKeys(): string[] {
+    const { routingKey } = this.spec;
+    if (! routingKey) return [];
+    return Array.isArray(routingKey) ? routingKey : [routingKey];
+  }
+
+  /**
+   * Checks if queue has a message TTL configured.
+   *
+   * @returns Message TTL in milliseconds, or undefined if not set
+   */
+  getMessageTtl(): number | undefined {
+    return this.spec.messageTtl;
+  }
+
+  /**
+   * Checks if queue has an expiration configured.
+   *
+   * @returns Queue expiration in milliseconds, or undefined if not set
+   */
+  getExpiration(): number | undefined {
+    return this.spec.expires;
+  }
+
+  /**
+   * Gets the dead-letter exchange if configured.
+   *
+   * @returns Dead-letter exchange name, or undefined if not configured
+   */
+  getDeadLetterExchange(): string | undefined {
+    return this.spec.deadLetterExchange;
+  }
+
+  /**
    * Asserts the queue exists with the configured specification.
    * Creates it if it doesn't exist.
    *

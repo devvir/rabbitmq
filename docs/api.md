@@ -249,9 +249,9 @@ broker.once('connect', () => console.log('Connected for first time'));
 
 ## Queue Interface
 
-Represents a RabbitMQ queue.
+Represents a RabbitMQ queue with methods for consuming, publishing, and introspection.
 
-### Methods
+### Operational Methods
 
 #### `async consume<T>(handler: (message: T) => Promise<void>, options?: ConsumeOptions): Promise<() => Promise<void>>`
 
@@ -317,13 +317,110 @@ Manually bind queue to exchange (called automatically during `declares()`).
 await queue.bind('trades', 'trade.*');
 ```
 
+### Introspection Methods
+
+#### `isDurable(): boolean`
+
+Check if the queue is configured as durable (survives broker restart).
+
+**Returns:** `true` if durable, `false` otherwise (default: `true`)
+
+**Example:**
+```typescript
+if (queue.isDurable()) {
+  console.log('Queue will survive broker restart');
+}
+```
+
+#### `autoDeletes(): boolean`
+
+Check if the queue is configured to auto-delete when no consumers remain.
+
+**Returns:** `true` if auto-delete enabled, `false` otherwise (default: `false`)
+
+**Example:**
+```typescript
+if (! queue.autoDeletes()) {
+  console.log('Queue persists after all consumers leave');
+}
+```
+
+#### `isExclusive(): boolean`
+
+Check if the queue is exclusive to this connection.
+
+**Returns:** `true` if exclusive, `false` otherwise (default: `false`)
+
+**Example:**
+```typescript
+if (queue.isExclusive()) {
+  console.log('Queue is only accessible by this connection');
+}
+```
+
+#### `getBindingRoutingKeys(): string[]`
+
+Get the routing keys this queue is bound to during initialization.
+
+**Returns:** Array of routing key patterns
+
+**Note:** Only returns routing keys from initial spec; additional bindings via `bind()` are not tracked.
+
+**Example:**
+```typescript
+const keys = queue.getBindingRoutingKeys();
+console.log(`Queue bound to: ${keys.join(', ')}`);
+```
+
+#### `getMessageTtl(): number | undefined`
+
+Get the message TTL (time-to-live) if configured.
+
+**Returns:** TTL in milliseconds, or `undefined` if not set
+
+**Example:**
+```typescript
+const ttl = queue.getMessageTtl();
+if (ttl) {
+  console.log(`Messages expire after ${ttl}ms`);
+}
+```
+
+#### `getExpiration(): number | undefined`
+
+Get the queue expiration time if configured.
+
+**Returns:** Expiration time in milliseconds, or `undefined` if not set
+
+**Example:**
+```typescript
+const expiry = queue.getExpiration();
+if (expiry) {
+  console.log(`Queue will be deleted after ${expiry}ms of inactivity`);
+}
+```
+
+#### `getDeadLetterExchange(): string | undefined`
+
+Get the dead-letter exchange if configured for failed messages.
+
+**Returns:** Dead-letter exchange name, or `undefined` if not configured
+
+**Example:**
+```typescript
+const dlx = queue.getDeadLetterExchange();
+if (dlx) {
+  console.log(`Failed messages sent to: ${dlx}`);
+}
+```
+
 ---
 
 ## Exchange Interface
 
-Represents a RabbitMQ exchange.
+Represents a RabbitMQ exchange with methods for publishing and introspection.
 
-### Methods
+### Operational Methods
 
 #### `async publish<T>(routingKey: string, message: T, options?: PublishOptions): Promise<void>`
 
@@ -339,6 +436,111 @@ Publish message to exchange with routing key.
 **Example:**
 ```typescript
 await exchange.publish('trade.btc', { price: 42500 });
+```
+
+### Introspection Methods
+
+#### `isDurable(): boolean`
+
+Check if the exchange is configured as durable (survives broker restart).
+
+**Returns:** `true` if durable, `false` otherwise (default: `true`)
+
+**Example:**
+```typescript
+if (exchange.isDurable()) {
+  console.log('Exchange will survive broker restart');
+}
+```
+
+#### `autoDeletes(): boolean`
+
+Check if the exchange is configured to auto-delete when no queues are bound.
+
+**Returns:** `true` if auto-delete enabled, `false` otherwise (default: `false`)
+
+**Example:**
+```typescript
+if (! exchange.autoDeletes()) {
+  console.log('Exchange persists even with no bound queues');
+}
+```
+
+#### `getType(): string`
+
+Get the exchange type.
+
+**Returns:** One of: `'direct'`, `'topic'`, `'fanout'`, `'headers'` (default: `'direct'`)
+
+**Example:**
+```typescript
+console.log(`Exchange type: ${exchange.getType()}`);
+```
+
+#### `isTopicExchange(): boolean`
+
+Check if this is a topic exchange (routes based on wildcard patterns).
+
+**Returns:** `true` if exchange type is `'topic'`
+
+**Example:**
+```typescript
+if (exchange.isTopicExchange()) {
+  console.log('Use patterns like "events.#" for binding');
+}
+```
+
+#### `isDirectExchange(): boolean`
+
+Check if this is a direct exchange (routes based on exact key match).
+
+**Returns:** `true` if exchange type is `'direct'`
+
+**Example:**
+```typescript
+if (exchange.isDirectExchange()) {
+  console.log('Use exact routing keys for binding');
+}
+```
+
+#### `isFanoutExchange(): boolean`
+
+Check if this is a fanout exchange (routes to all bound queues).
+
+**Returns:** `true` if exchange type is `'fanout'`
+
+**Example:**
+```typescript
+if (exchange.isFanoutExchange()) {
+  console.log('All bound queues receive every message');
+}
+```
+
+#### `isHeadersExchange(): boolean`
+
+Check if this is a headers exchange (routes based on message headers).
+
+**Returns:** `true` if exchange type is `'headers'`
+
+**Example:**
+```typescript
+if (exchange.isHeadersExchange()) {
+  console.log('Use message headers for routing');
+}
+```
+
+#### `getAlternateExchange(): string | undefined`
+
+Get the alternate exchange for unrouteable messages if configured.
+
+**Returns:** Alternate exchange name, or `undefined` if not configured
+
+**Example:**
+```typescript
+const altExchange = exchange.getAlternateExchange();
+if (altExchange) {
+  console.log(`Unrouteable messages sent to: ${altExchange}`);
+}
 ```
 
 ---
