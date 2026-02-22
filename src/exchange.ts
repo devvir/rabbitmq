@@ -109,12 +109,18 @@ export class Exchange {
   }
 
   /**
-   * Gets a queue by name if it exists.
+   * Gets a queue by name, or the only queue if name is not provided.
    *
-   * @param queueName - Name of the queue
+   * @param queueName - Name of the queue (optional, required if multiple queues exist)
    * @returns Queue instance or undefined
+   * @throws if queueName is not provided but multiple queues exist
    */
-  getQueue(queueName: string): Queue | undefined {
+  getQueue(queueName?: string): Queue | undefined {
+    if (queueName === undefined) {
+      if (this.queues.size === 0) return undefined;
+      if (this.queues.size === 1) return Array.from(this.queues.values())[0];
+      throw new Error(`Multiple queues exist in exchange, specify name: ${Array.from(this.queues.keys()).join(', ')}`);
+    }
     return this.queues.get(queueName);
   }
 

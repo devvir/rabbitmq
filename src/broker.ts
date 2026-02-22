@@ -158,12 +158,18 @@ export class Broker extends EventEmitter {
   }
 
   /**
-   * Gets an exchange by name.
+   * Gets an exchange by name, or the only exchange if name is not provided.
    *
-   * @param name - Exchange name
+   * @param name - Exchange name (optional, required if multiple exchanges exist)
    * @returns Exchange instance or undefined
+   * @throws if name is not provided but multiple exchanges exist
    */
-  getExchange(name: string): Exchange | undefined {
+  getExchange(name?: string): Exchange | undefined {
+    if (name === undefined) {
+      if (this.exchanges.size === 0) return undefined;
+      if (this.exchanges.size === 1) return Array.from(this.exchanges.values())[0];
+      throw new Error(`Multiple exchanges exist, specify name: ${Array.from(this.exchanges.keys()).join(', ')}`);
+    }
     return this.exchanges.get(name);
   }
 
@@ -177,12 +183,18 @@ export class Broker extends EventEmitter {
   }
 
   /**
-   * Gets a queue by name.
+   * Gets a queue by name, or the only queue if name is not provided.
    *
-   * @param name - Queue name
+   * @param name - Queue name (optional, required if multiple queues exist)
    * @returns Queue instance or undefined
+   * @throws if name is not provided but multiple queues exist
    */
-  getQueue(name: string): Queue | undefined {
+  getQueue(name?: string): Queue | undefined {
+    if (name === undefined) {
+      if (this.queues.size === 0) return undefined;
+      if (this.queues.size === 1) return Array.from(this.queues.values())[0];
+      throw new Error(`Multiple queues exist, specify name: ${Array.from(this.queues.keys()).join(', ')}`);
+    }
     return this.queues.get(name);
   }
 
