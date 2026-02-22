@@ -203,11 +203,14 @@ describe('Queue', () => {
       } as any;
 
       mockChannel.consume.mockImplementation(async (q, handler) => {
-        await handler?.(message);
+        handler?.(message);
         return { consumerTag: 'tag' };
       });
 
       await queue.consume(callback);
+
+      // Give the promise chain time to execute
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(mockChannel.nack).toHaveBeenCalledWith(message, false, true);
     });
