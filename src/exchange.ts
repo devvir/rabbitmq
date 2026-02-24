@@ -138,9 +138,10 @@ export class Exchange {
 
   /**
    * Publishes a message to the exchange.
-   * Message is automatically serialized to JSON.
+   * If message is a Buffer, sends it as-is.
+   * Otherwise, automatically serializes to JSON.
    *
-   * @param message - Any serializable JavaScript value
+   * @param message - Buffer (for binary) or any serializable JavaScript value
    * @param routingKey - Routing key for the message
    * @param options - Publishing options
    * @returns true if message was sent (channel buffer not full), false otherwise
@@ -148,7 +149,10 @@ export class Exchange {
   publish(message: any, routingKey: string, options: PublishOptions = {}): boolean {
     const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
 
-    const buffer = Buffer.from(JSON.stringify(message), 'utf-8');
+    // If message is already a Buffer, use it directly (don't JSON.stringify)
+    const buffer = Buffer.isBuffer(message)
+      ? message
+      : Buffer.from(JSON.stringify(message), 'utf-8');
 
     return this.channel.publish(this.name, routingKey, buffer, {
       persistent,
