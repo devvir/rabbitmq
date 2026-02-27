@@ -42,7 +42,8 @@
  */
 
 // Core exports
-export { Broker, connect, keepAlive, connectOrFail } from './broker';
+export { Broker } from './broker';
+export { connect, keepAlive, connectOrFail } from './factories';
 export { Exchange } from './exchange';
 export { Queue } from './queue';
 

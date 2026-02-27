@@ -34,6 +34,43 @@ describe('Exchange', () => {
         durable: true,
       });
     });
+
+    it('should report type-checking helpers', () => {
+      expect(exchange.isTopicExchange()).toBe(true);
+      expect(exchange.isDirectExchange()).toBe(false);
+      expect(exchange.isFanoutExchange()).toBe(false);
+      expect(exchange.isHeadersExchange()).toBe(false);
+    });
+
+    it('should report durability and autoDelete', () => {
+      expect(exchange.isDurable()).toBe(true);
+      expect(exchange.autoDeletes()).toBe(false);
+    });
+
+    it('should default to direct when type is not specified', () => {
+      const ex = new Exchange(mockChannel, 'default-ex', {});
+      expect(ex.getType()).toBe('direct');
+      expect(ex.isDirectExchange()).toBe(true);
+    });
+
+    it('should return alternate exchange when configured', () => {
+      const ex = new Exchange(mockChannel, 'ae-ex', { alternateExchange: 'ex.dead' });
+      expect(ex.getAlternateExchange()).toBe('ex.dead');
+    });
+
+    it('should return undefined alternate exchange when not configured', () => {
+      expect(exchange.getAlternateExchange()).toBeUndefined();
+    });
+
+    it('should identify fanout exchange', () => {
+      const ex = new Exchange(mockChannel, 'fanout-ex', { type: 'fanout' });
+      expect(ex.isFanoutExchange()).toBe(true);
+    });
+
+    it('should identify headers exchange', () => {
+      const ex = new Exchange(mockChannel, 'headers-ex', { type: 'headers' });
+      expect(ex.isHeadersExchange()).toBe(true);
+    });
   });
 
   describe('assert', () => {
@@ -268,6 +305,76 @@ describe('Exchange', () => {
         Buffer.from(JSON.stringify(message), 'utf-8'),
         expect.any(Object)
       );
+    });
+  });
+
+  describe('setChannel', () => {
+    it('should replace the underlying channel', () => {
+      const newChannel = {
+        ...mockChannel,
+        publish: vi.fn().mockReturnValue(true),
+      } as any;
+
+      exchange.setChannel(newChannel);
+      exchange.publish({ test: true }, 'key');
+
+      expect(newChannel.publish).toHaveBeenCalled();
+      expect(mockChannel.publish).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('publish with onDrain', () => {
+    it('should call onDrain when buffer is full', () => {
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn();
+      const onDrain = vi.fn();
+
+      const result = exchange.publish({ data: 1 }, 'key', { onDrain });
+
+      expect(result).toBe(false);
+      expect(mockChannel.once).toHaveBeenCalledWith('drain', onDrain);
+    });
+
+    it('should not register onDrain when publish succeeds', () => {
+      mockChannel.publish.mockReturnValue(true);
+      mockChannel.once = vi.fn();
+      const onDrain = vi.fn();
+
+      const result = exchange.publish({ data: 1 }, 'key', { onDrain });
+
+      expect(result).toBe(true);
+      expect(mockChannel.once).not.toHaveBeenCalled();
+    });
+
+    it('should not register drain listener when no onDrain callback', () => {
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn();
+
+      exchange.publish({ data: 1 }, 'key');
+
+      expect(mockChannel.once).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('publishAsync', () => {
+    it('should resolve immediately when publish succeeds', async () => {
+      mockChannel.publish.mockReturnValue(true);
+
+      await exchange.publishAsync({ data: 1 }, 'key');
+
+      expect(mockChannel.publish).toHaveBeenCalled();
+    });
+
+    it('should wait for drain when buffer is full', async () => {
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn().mockImplementation((event: string, cb: () => void) => {
+        // Simulate drain event after short delay
+        setTimeout(cb, 10);
+      });
+
+      await exchange.publishAsync({ data: 1 }, 'key');
+
+      expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
     });
   });
 });

@@ -22,6 +22,13 @@ export class Queue {
   }
 
   /**
+   * Replaces the underlying channel (used after reconnection).
+   */
+  setChannel(channel: RawChannel): void {
+    this.channel = channel;
+  }
+
+  /**
    * Gets the queue name.
    */
   getName(): string {

@@ -23,6 +23,13 @@ export class Exchange {
   }
 
   /**
+   * Replaces the underlying channel (used after reconnection).
+   */
+  setChannel(channel: RawChannel): void {
+    this.channel = channel;
+  }
+
+  /**
    * Gets the exchange name.
    */
   getName(): string {
@@ -137,29 +144,55 @@ export class Exchange {
   }
 
   /**
-   * Publishes a message to the exchange.
-   * If message is a Buffer, sends it as-is.
-   * Otherwise, automatically serializes to JSON.
+   * Publishes a message to the exchange synchronously.
+   * If message is a Buffer, sends it as-is; otherwise auto-serializes to JSON.
    *
    * @param message - Buffer (for binary) or any serializable JavaScript value
    * @param routingKey - Routing key for the message
-   * @param options - Publishing options
-   * @returns true if message was sent (channel buffer not full), false otherwise
+   * @param options - Publishing options (may include `onDrain` callback for backpressure)
+   * @returns true if message was queued, false if buffer full (onDrain called when ready)
    */
-  publish(message: any, routingKey: string, options: PublishOptions = {}): boolean {
-    const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
+  publish(
+    message: any,
+    routingKey: string,
+    options: PublishOptions & { onDrain?: () => void } = {}
+  ): boolean {
+    const { persistent = true, contentType = 'application/json', onDrain, ...otherOptions } = options;
 
     // If message is already a Buffer, use it directly (don't JSON.stringify)
     const buffer = Buffer.isBuffer(message)
       ? message
       : Buffer.from(JSON.stringify(message), 'utf-8');
 
-    return this.channel.publish(this.name, routingKey, buffer, {
+    const published = this.channel.publish(this.name, routingKey, buffer, {
       persistent,
       contentType,
       contentEncoding: 'utf-8',
       ...otherOptions,
     });
+
+    // If write buffer is full and callback provided, invoke it when drain completes
+    if (! published && onDrain) {
+      this.channel.once('drain', onDrain);
+    }
+
+    return published;
+  }
+
+  /**
+   * Publishes a message to the exchange asynchronously.
+   * Automatically handles RabbitMQ backpressure by waiting for drain if needed.
+   *
+   * @param message - Buffer (for binary) or any serializable JavaScript value
+   * @param routingKey - Routing key for the message
+   * @param options - Publishing options
+   */
+  async publishAsync(message: any, routingKey: string, options: PublishOptions = {}): Promise<void> {
+    const published = this.publish(message, routingKey, options);
+
+    if (! published) {
+      await new Promise<void>(resolve => this.channel.once('drain', resolve));
+    }
   }
 
   /**

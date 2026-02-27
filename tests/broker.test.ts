@@ -3,7 +3,8 @@
  */
 
 import { vi } from 'vitest';
-import { Broker, connect, keepAlive, connectOrFail } from '../src/broker';
+import { Broker } from '../src/broker';
+import { connect, keepAlive, connectOrFail } from '../src/factories';
 import * as connection from '../src/connection';
 import amqp from 'amqplib';
 
@@ -506,6 +507,137 @@ describe('Broker', () => {
   describe('getLastError', () => {
     it('should return last error or null', () => {
       expect(broker.getLastError()).toBeNull();
+    });
+  });
+
+  describe('recovery', () => {
+    it('should recover channel on channel close', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      // Capture the channel 'close' handler
+      const closeHandlers = (mockChannel.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const channelCloseHandler = closeHandlers[closeHandlers.length - 1]?.[1];
+      expect(channelCloseHandler).toBeDefined();
+
+      // Create a new channel for recovery
+      const newChannel = {
+        setMaxListeners: vi.fn(),
+        on: vi.fn(),
+        once: vi.fn(),
+        assertExchange: vi.fn(),
+        assertQueue: vi.fn(),
+      };
+      (connection.createChannel as ReturnType<typeof vi.fn>).mockResolvedValue(newChannel);
+
+      // Trigger channel close
+      channelCloseHandler();
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(connection.createChannel).toHaveBeenCalledTimes(2); // initial + recovery
+    });
+
+    it('should emit disconnect on connection close', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      const disconnectListener = vi.fn();
+      broker.on('disconnect', disconnectListener);
+
+      // Capture the connection 'close' handler
+      const closeHandlers = (mockConnection.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const connCloseHandler = closeHandlers[closeHandlers.length - 1]?.[1];
+      expect(connCloseHandler).toBeDefined();
+
+      connCloseHandler();
+
+      expect(disconnectListener).toHaveBeenCalled();
+      expect(broker.getState()).toBe('disconnected');
+    });
+
+    it('should abort when connection fails without unlimited retries', async () => {
+      const failBroker = new Broker('amqp://localhost', { retries: 0 });
+      (connection.connectWithRetries as ReturnType<typeof vi.fn>).mockRejectedValue(
+        new Error('Connection refused'),
+      );
+
+      const abortListener = vi.fn();
+      failBroker.on('abort', abortListener);
+
+      failBroker.connect();
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(abortListener).toHaveBeenCalled();
+      expect(failBroker.getState()).toBe('disconnected');
+    });
+
+    it('should schedule reconnect on failure with unlimited retries', async () => {
+      const aliveBroker = new Broker('amqp://localhost', { retries: -1, retryDelay: 10 });
+      (connection.connectWithRetries as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Temporary failure'),
+      );
+
+      aliveBroker.connect();
+      await new Promise(resolve => setImmediate(resolve));
+
+      // State should be connecting, reconnect scheduled
+      expect(aliveBroker.getState()).toBe('connecting');
+    });
+
+    it('should fall back to full reconnect when channel recovery fails', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      // Make channel recovery fail (createChannel rejects)
+      (connection.createChannel as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('Channel dead'),
+      );
+
+      const disconnectListener = vi.fn();
+      broker.on('disconnect', disconnectListener);
+
+      // Trigger channel-only close
+      const channelCloseHandlers = (mockChannel.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const channelCloseHandler = channelCloseHandlers[channelCloseHandlers.length - 1]?.[1];
+
+      channelCloseHandler();
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(disconnectListener).toHaveBeenCalled();
+    });
+
+    it('should ignore disconnect when state is closed', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      await broker.close();
+
+      const disconnectListener = vi.fn();
+      broker.on('disconnect', disconnectListener);
+
+      // Trigger connection close after broker is already closed
+      const connCloseHandlers = (mockConnection.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const connCloseHandler = connCloseHandlers[connCloseHandlers.length - 1]?.[1];
+      connCloseHandler();
+
+      expect(disconnectListener).not.toHaveBeenCalled();
+    });
+
+    it('should track errors via handleError', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      // Trigger an error event on channel
+      const errorHandlers = (mockChannel.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'error');
+      const errorHandler = errorHandlers[errorHandlers.length - 1]?.[1];
+      errorHandler(new Error('Channel error'));
+
+      expect(broker.getLastError()?.message).toBe('Channel error');
     });
   });
 });

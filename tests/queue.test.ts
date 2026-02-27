@@ -352,4 +352,19 @@ describe('Queue', () => {
       expect(callback).toHaveBeenCalledWith('not valid json', expect.any(Object));
     });
   });
+
+  describe('setChannel', () => {
+    it('should replace the underlying channel', async () => {
+      const newChannel = {
+        ...mockChannel,
+        assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
+      } as any;
+
+      queue.setChannel(newChannel);
+      await queue.assert();
+
+      expect(newChannel.assertQueue).toHaveBeenCalled();
+      expect(mockChannel.assertQueue).not.toHaveBeenCalled();
+    });
+  });
 });
