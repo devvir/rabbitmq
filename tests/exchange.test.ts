@@ -116,53 +116,7 @@ describe('Exchange', () => {
     });
   });
 
-  describe('publish', () => {
-    it('should publish a message to the exchange', () => {
-      const message = { test: 'data', number: 42 };
-      const result = exchange.publish(message, 'routing.key');
 
-      expect(result).toBe(true);
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'routing.key',
-        Buffer.from(JSON.stringify(message), 'utf-8'),
-        {
-          persistent: true,
-          contentType: 'application/json',
-          contentEncoding: 'utf-8',
-        }
-      );
-    });
-
-    it('should respect publish options', () => {
-      const message = { test: 'data' };
-      exchange.publish(message, 'routing.key', {
-        persistent: false,
-        priority: 5,
-        headers: { 'custom-header': 'value' },
-      });
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'routing.key',
-        Buffer.from(JSON.stringify(message), 'utf-8'),
-        expect.objectContaining({
-          persistent: false,
-          priority: 5,
-          headers: { 'custom-header': 'value' },
-          contentType: 'application/json',
-        })
-      );
-    });
-
-    it('should handle channel buffer full (returns false)', () => {
-      mockChannel.publish.mockReturnValue(false);
-
-      const result = exchange.publish({ test: 'data' }, 'routing.key');
-
-      expect(result).toBe(false);
-    });
-  });
 
   describe('createQueue', () => {
     it('should create and bind a queue to exchange', async () => {
@@ -309,58 +263,27 @@ describe('Exchange', () => {
   });
 
   describe('setChannel', () => {
-    it('should replace the underlying channel', () => {
+    it('should replace the underlying channel', async () => {
       const newChannel = {
         ...mockChannel,
         publish: vi.fn().mockReturnValue(true),
       } as any;
 
       exchange.setChannel(newChannel);
-      exchange.publish({ test: true }, 'key');
+      await exchange.publish({ test: true }, 'key');
 
       expect(newChannel.publish).toHaveBeenCalled();
       expect(mockChannel.publish).not.toHaveBeenCalled();
     });
   });
 
-  describe('publish with onDrain', () => {
-    it('should call onDrain when buffer is full', () => {
-      mockChannel.publish.mockReturnValue(false);
-      mockChannel.once = vi.fn();
-      const onDrain = vi.fn();
 
-      const result = exchange.publish({ data: 1 }, 'key', { onDrain });
 
-      expect(result).toBe(false);
-      expect(mockChannel.once).toHaveBeenCalledWith('drain', onDrain);
-    });
-
-    it('should not register onDrain when publish succeeds', () => {
-      mockChannel.publish.mockReturnValue(true);
-      mockChannel.once = vi.fn();
-      const onDrain = vi.fn();
-
-      const result = exchange.publish({ data: 1 }, 'key', { onDrain });
-
-      expect(result).toBe(true);
-      expect(mockChannel.once).not.toHaveBeenCalled();
-    });
-
-    it('should not register drain listener when no onDrain callback', () => {
-      mockChannel.publish.mockReturnValue(false);
-      mockChannel.once = vi.fn();
-
-      exchange.publish({ data: 1 }, 'key');
-
-      expect(mockChannel.once).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('publishAsync', () => {
+  describe('publish', () => {
     it('should resolve immediately when publish succeeds', async () => {
       mockChannel.publish.mockReturnValue(true);
 
-      await exchange.publishAsync({ data: 1 }, 'key');
+      await exchange.publish({ data: 1 }, 'key');
 
       expect(mockChannel.publish).toHaveBeenCalled();
     });
@@ -372,198 +295,13 @@ describe('Exchange', () => {
         setTimeout(cb, 10);
       });
 
-      await exchange.publishAsync({ data: 1 }, 'key');
+      await exchange.publish({ data: 1 }, 'key');
 
       expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
     });
   });
 
   describe('republish', () => {
-    const createRawMessage = (overrides: Record<string, any> = {}) => ({
-      content: Buffer.from('{"data":"test"}'),
-      fields: {
-        deliveryTag: 1,
-        redelivered: false,
-        exchange: 'source-exchange',
-        routingKey: 'original.key',
-        consumerTag: 'ctag',
-        ...overrides.fields,
-      },
-      properties: {
-        contentType: 'application/json',
-        contentEncoding: 'utf-8',
-        headers: { 'x-custom': 'value' },
-        deliveryMode: 2,
-        priority: 5,
-        correlationId: 'corr-123',
-        replyTo: 'reply-queue',
-        expiration: '60000',
-        messageId: 'msg-456',
-        timestamp: 1700000000,
-        userId: undefined,
-        appId: 'test-app',
-        type: undefined,
-        clusterId: undefined,
-        ...overrides.properties,
-      },
-    });
-
-    it('preserves all original properties by default', () => {
-      const rawMsg = createRawMessage();
-
-      exchange.republish(rawMsg as any);
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'original.key',
-        rawMsg.content,
-        {
-          persistent: true,
-          contentType: 'application/json',
-          contentEncoding: 'utf-8',
-          headers: { 'x-custom': 'value' },
-          priority: 5,
-          correlationId: 'corr-123',
-          replyTo: 'reply-queue',
-          expiration: '60000',
-          messageId: 'msg-456',
-          timestamp: 1700000000,
-          userId: undefined,
-          appId: 'test-app',
-        }
-      );
-    });
-
-    it('preserves original routing key when no override', () => {
-      const rawMsg = createRawMessage();
-
-      exchange.republish(rawMsg as any);
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'original.key',
-        expect.any(Buffer),
-        expect.any(Object)
-      );
-    });
-
-    it('overrides routing key when specified', () => {
-      const rawMsg = createRawMessage();
-
-      exchange.republish(rawMsg as any, { routingKey: 'new.key' });
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'new.key',
-        rawMsg.content,
-        expect.any(Object)
-      );
-    });
-
-    it('overrides headers when specified', () => {
-      const rawMsg = createRawMessage();
-
-      exchange.republish(rawMsg as any, { headers: { replaced: true } });
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'original.key',
-        rawMsg.content,
-        expect.objectContaining({
-          headers: { replaced: true },
-        })
-      );
-    });
-
-    it('overrides multiple properties selectively', () => {
-      const rawMsg = createRawMessage();
-
-      exchange.republish(rawMsg as any, {
-        routingKey: 'override.key',
-        priority: 10,
-        expiration: '30000',
-      });
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'override.key',
-        rawMsg.content,
-        expect.objectContaining({
-          priority: 10,
-          expiration: '30000',
-          // Original properties still present
-          contentType: 'application/json',
-          headers: { 'x-custom': 'value' },
-          correlationId: 'corr-123',
-        })
-      );
-    });
-
-    it('forwards raw buffer without re-serialization', () => {
-      const binaryContent = Buffer.from([0x00, 0x01, 0x02, 0xff]);
-      const rawMsg = createRawMessage();
-      rawMsg.content = binaryContent;
-
-      exchange.republish(rawMsg as any);
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        'original.key',
-        binaryContent,
-        expect.any(Object)
-      );
-    });
-
-    it('maps deliveryMode 2 to persistent true', () => {
-      const rawMsg = createRawMessage({ properties: { deliveryMode: 2 } });
-
-      exchange.republish(rawMsg as any);
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        expect.any(String),
-        expect.any(Buffer),
-        expect.objectContaining({ persistent: true })
-      );
-    });
-
-    it('maps deliveryMode 1 to persistent false', () => {
-      const rawMsg = createRawMessage({ properties: { deliveryMode: 1 } });
-
-      exchange.republish(rawMsg as any);
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        expect.any(String),
-        expect.any(Buffer),
-        expect.objectContaining({ persistent: false })
-      );
-    });
-
-    it('allows overriding persistent flag', () => {
-      const rawMsg = createRawMessage({ properties: { deliveryMode: 2 } });
-
-      exchange.republish(rawMsg as any, { persistent: false });
-
-      expect(mockChannel.publish).toHaveBeenCalledWith(
-        'test-exchange',
-        expect.any(String),
-        expect.any(Buffer),
-        expect.objectContaining({ persistent: false })
-      );
-    });
-
-    it('returns channel publish result', () => {
-      mockChannel.publish.mockReturnValue(false);
-      const rawMsg = createRawMessage();
-
-      const result = exchange.republish(rawMsg as any);
-
-      expect(result).toBe(false);
-    });
-  });
-
-  describe('republishAsync', () => {
     const createRawMessage = () => ({
       content: Buffer.from('{"data":"test"}'),
       fields: {
@@ -595,7 +333,7 @@ describe('Exchange', () => {
       mockChannel.publish.mockReturnValue(true);
       const rawMsg = createRawMessage();
 
-      await exchange.republishAsync(rawMsg as any, { routingKey: 'new.key' });
+      await exchange.republish(rawMsg as any, { routingKey: 'new.key' });
 
       expect(mockChannel.publish).toHaveBeenCalledWith(
         'test-exchange',
@@ -613,7 +351,7 @@ describe('Exchange', () => {
 
       const rawMsg = createRawMessage();
 
-      await exchange.republishAsync(rawMsg as any);
+      await exchange.republish(rawMsg as any);
 
       expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
     });

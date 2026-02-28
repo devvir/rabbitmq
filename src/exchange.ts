@@ -4,7 +4,7 @@
  */
 
 import amqp from 'amqplib';
-import { ExchangeSpec, PublishOptions, RawChannel } from './types';
+import { ExchangeSpec, PublishOptions, RawChannel, RawMessage, RepublishOptions } from './types';
 import { Queue } from './queue';
 
 /**
@@ -15,6 +15,7 @@ export class Exchange {
   private name: string;
   private spec: ExchangeSpec;
   private queues: Map<string, Queue> = new Map();
+  private drainPromise: Promise<void> | null = null;
 
   constructor(channel: RawChannel, name: string, spec: ExchangeSpec = {}) {
     this.channel = channel;
@@ -144,20 +145,16 @@ export class Exchange {
   }
 
   /**
-   * Publishes a message to the exchange synchronously.
+   * Publishes a message to the exchange.
    * If message is a Buffer, sends it as-is; otherwise auto-serializes to JSON.
+   * Automatically handles RabbitMQ backpressure by waiting for drain if needed.
    *
    * @param message - Buffer (for binary) or any serializable JavaScript value
    * @param routingKey - Routing key for the message
-   * @param options - Publishing options (may include `onDrain` callback for backpressure)
-   * @returns true if message was queued, false if buffer full (onDrain called when ready)
+   * @param options - Publishing options
    */
-  publish(
-    message: any,
-    routingKey: string,
-    options: PublishOptions & { onDrain?: () => void } = {}
-  ): boolean {
-    const { persistent = true, contentType = 'application/json', onDrain, ...otherOptions } = options;
+  async publish(message: any, routingKey: string, options: PublishOptions = {}): Promise<void> {
+    const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
 
     // If message is already a Buffer, use it directly (don't JSON.stringify)
     const buffer = Buffer.isBuffer(message)
@@ -171,27 +168,8 @@ export class Exchange {
       ...otherOptions,
     });
 
-    // If write buffer is full and callback provided, invoke it when drain completes
-    if (! published && onDrain) {
-      this.channel.once('drain', onDrain);
-    }
-
-    return published;
-  }
-
-  /**
-   * Publishes a message to the exchange asynchronously.
-   * Automatically handles RabbitMQ backpressure by waiting for drain if needed.
-   *
-   * @param message - Buffer (for binary) or any serializable JavaScript value
-   * @param routingKey - Routing key for the message
-   * @param options - Publishing options
-   */
-  async publishAsync(message: any, routingKey: string, options: PublishOptions = {}): Promise<void> {
-    const published = this.publish(message, routingKey, options);
-
     if (! published) {
-      await new Promise<void>(resolve => this.channel.once('drain', resolve));
+      await this.waitForDrain();
     }
   }
 
@@ -199,16 +177,16 @@ export class Exchange {
    * Republishes an existing message to this exchange, preserving all original
    * properties (headers, content type, encoding, persistence, etc.).
    * Only the routing key and explicitly overridden properties change.
+   * Automatically handles RabbitMQ backpressure by waiting for drain if needed.
    *
    * @param original - The raw consumed message (from consumer callback)
    * @param overrides - Optional property overrides (routingKey, headers, etc.)
-   * @returns true if message was queued, false if buffer full
    */
-  republish(original: import('./types').RawMessage, overrides: import('./types').RepublishOptions = {}): boolean {
+  async republish(original: RawMessage, overrides: RepublishOptions = {}): Promise<void> {
     const props = original.properties;
     const routingKey = overrides.routingKey ?? original.fields.routingKey;
 
-    return this.channel.publish(this.name, routingKey, original.content, {
+    const published = this.channel.publish(this.name, routingKey, original.content, {
       persistent: overrides.persistent ?? (props.deliveryMode === 2),
       contentType: overrides.contentType ?? props.contentType,
       contentEncoding: overrides.contentEncoding ?? props.contentEncoding,
@@ -222,20 +200,26 @@ export class Exchange {
       userId: overrides.userId ?? props.userId,
       appId: overrides.appId ?? props.appId,
     });
+
+    if (! published) {
+      await this.waitForDrain();
+    }
   }
 
   /**
-   * Async version of republish. Waits for drain if channel buffer is full.
-   *
-   * @param original - The raw consumed message (from consumer callback)
-   * @param overrides - Optional property overrides (routingKey, headers, etc.)
+   * Waits for the channel to drain. Shares a single listener across
+   * all concurrent callers to avoid EventEmitter listener leaks.
    */
-  async republishAsync(original: import('./types').RawMessage, overrides: import('./types').RepublishOptions = {}): Promise<void> {
-    const published = this.republish(original, overrides);
-
-    if (! published) {
-      await new Promise<void>(resolve => this.channel.once('drain', resolve));
+  private waitForDrain(): Promise<void> {
+    if (! this.drainPromise) {
+      this.drainPromise = new Promise<void>(resolve => {
+        this.channel.once('drain', () => {
+          this.drainPromise = null;
+          resolve();
+        });
+      });
     }
+    return this.drainPromise;
   }
 
   /**

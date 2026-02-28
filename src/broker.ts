@@ -220,7 +220,7 @@ export class Broker extends EventEmitter {
 
   // ── Publishing ───────────────────────────────────────────────────────────
 
-  publish(exchange: string, message: any, routingKey: string, options?: PublishOptions): boolean {
+  async publish(exchange: string, message: any, routingKey: string, options?: PublishOptions): Promise<void> {
     if (! this.channel) throw new Error('Not connected to RabbitMQ');
 
     const ex = this.exchanges.get(exchange);
@@ -228,15 +228,7 @@ export class Broker extends EventEmitter {
     return ex.publish(message, routingKey, options);
   }
 
-  async publishAsync(exchange: string, message: any, routingKey: string, options?: PublishOptions): Promise<void> {
-    if (! this.channel) throw new Error('Not connected to RabbitMQ');
-
-    const ex = this.exchanges.get(exchange);
-    if (! ex) throw new Error(`Exchange '${exchange}' not declared`);
-    return ex.publishAsync(message, routingKey, options);
-  }
-
-  publishesOn(config: PublishConfig): (message: any, key?: string, options?: PublishOptions) => boolean {
+  publishesOn(config: PublishConfig): (message: any, key?: string, options?: PublishOptions) => Promise<void> {
     const { exchange, key: defaultKey = '', ...publishOptions } = config;
     return (message: any, key = defaultKey, options = {}) =>
       this.publish(exchange, message, key, { ...publishOptions, ...options });

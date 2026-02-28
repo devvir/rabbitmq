@@ -277,7 +277,7 @@ type PriceAlert = { symbol: string; threshold: number };
 await broker.declares({
   exchanges: {
     // Primary event stream
-    'bitmex-feed': {
+    'broadcast': {
       type: 'topic',
       durable: true,
       queues: {
@@ -315,7 +315,7 @@ await broker.declares({
 
 // Publish
 await broker.publish<TradeEvent>(
-  'bitmex-feed',
+  'broadcast',
   'trade.btc',
   { symbol: 'XBTUSD', price: 42500, timestamp: new Date().toISOString() }
 );
@@ -343,7 +343,7 @@ After declaring, access them by name:
 const queue = broker.queue('trade-archive');
 
 // Get exchange reference
-const exchange = broker.exchange('bitmex-feed');
+const exchange = broker.exchange('broadcast');
 
 // Publish to exchange
 await exchange.publish('trade.btc', data);

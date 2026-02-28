@@ -459,7 +459,7 @@ await sourceQueue.consume(async (_message, { ack, original }) => {
 });
 ```
 
-#### `async republishAsync(original: RawMessage, overrides?: RepublishOptions): Promise<void>`
+#### `async republish(original: RawMessage, overrides?: RepublishOptions): Promise<void>`
 
 Async version of `republish()`. Waits for drain if channel buffer is full.
 
@@ -472,7 +472,7 @@ Async version of `republish()`. Waits for drain if channel buffer is full.
 **Example:**
 ```typescript
 await sourceQueue.consume(async (_message, { ack, original }) => {
-  await exchange.republishAsync(original, { routingKey: 'forwarded.key' });
+  await exchange.republish(original, { routingKey: 'forwarded.key' });
   ack();
 });
 ```

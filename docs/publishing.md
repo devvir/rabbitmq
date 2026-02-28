@@ -255,11 +255,11 @@ await sourceQueue.consume(async (_message, { ack, original }) => {
 
 ### Async Republish (Backpressure)
 
-Use `republishAsync` to handle channel backpressure (waits for drain):
+Use `republish` to handle channel backpressure (waits for drain):
 
 ```typescript
 await sourceQueue.consume(async (_message, { ack, original }) => {
-  await targetExchange.republishAsync(original, { routingKey: 'new.key' });
+  await targetExchange.republish(original, { routingKey: 'new.key' });
   ack();
 });
 ```

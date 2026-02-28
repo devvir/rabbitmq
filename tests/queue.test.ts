@@ -102,11 +102,12 @@ describe('Queue', () => {
   });
 
   describe('publish', () => {
-    it('should publish a message to the queue', () => {
+    it('should publish a message to the queue', async () => {
+      mockChannel.sendToQueue.mockReturnValue(true);
       const message = { test: 'data', number: 42 };
-      const result = queue.publish(message);
 
-      expect(result).toBe(true);
+      await queue.publish(message);
+
       expect(mockChannel.sendToQueue).toHaveBeenCalledWith(
         'test-queue',
         Buffer.from(JSON.stringify(message), 'utf-8'),
@@ -118,9 +119,11 @@ describe('Queue', () => {
       );
     });
 
-    it('should respect publish options', () => {
+    it('should respect publish options', async () => {
+      mockChannel.sendToQueue.mockReturnValue(true);
       const message = { test: 'data' };
-      queue.publish(message, {
+
+      await queue.publish(message, {
         persistent: false,
         priority: 5,
         expiration: 10000,
@@ -137,12 +140,16 @@ describe('Queue', () => {
       );
     });
 
-    it('should handle channel buffer full (returns false)', () => {
+    it('should wait for drain when buffer is full', async () => {
       mockChannel.sendToQueue.mockReturnValue(false);
+      mockChannel.once = vi.fn().mockImplementation((event: string, cb: () => void) => {
+        // Simulate drain event after short delay
+        setTimeout(cb, 10);
+      });
 
-      const result = queue.publish({ test: 'data' });
+      await queue.publish({ test: 'data' });
 
-      expect(result).toBe(false);
+      expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
     });
   });
 

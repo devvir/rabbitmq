@@ -14,6 +14,7 @@ export class Queue {
   private name: string;
   private spec: QueueSpec;
   private consumerTags: Map<string, () => void> = new Map();
+  private drainPromise: Promise<void> | null = null;
 
   constructor(channel: RawChannel, name: string, spec: QueueSpec = {}) {
     this.channel = channel;
@@ -183,9 +184,8 @@ export class Queue {
    *
    * @param message - Buffer (for binary) or any serializable JavaScript value
    * @param options - Publishing options
-   * @returns true if message was sent (channel buffer not full), false otherwise
    */
-  publish(message: any, options: PublishOptions = {}): boolean {
+  async publish(message: any, options: PublishOptions = {}): Promise<void> {
     const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
 
     // If message is already a Buffer, use it directly (don't JSON.stringify)
@@ -193,12 +193,32 @@ export class Queue {
       ? message
       : Buffer.from(JSON.stringify(message), 'utf-8');
 
-    return this.channel.sendToQueue(this.name, buffer, {
+    const published = this.channel.sendToQueue(this.name, buffer, {
       persistent,
       contentType,
       contentEncoding: 'utf-8',
       ...otherOptions,
     });
+
+    if (! published) {
+      await this.waitForDrain();
+    }
+  }
+
+  /**
+   * Waits for the channel to drain. Shares a single listener across
+   * all concurrent callers to avoid EventEmitter listener leaks.
+   */
+  private waitForDrain(): Promise<void> {
+    if (! this.drainPromise) {
+      this.drainPromise = new Promise<void>(resolve => {
+        this.channel.once('drain', () => {
+          this.drainPromise = null;
+          resolve();
+        });
+      });
+    }
+    return this.drainPromise;
   }
 
   /**

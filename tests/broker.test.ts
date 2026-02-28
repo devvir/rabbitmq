@@ -279,6 +279,7 @@ describe('Broker', () => {
 
   describe('publish', () => {
     it('should publish message to exchange', async () => {
+      mockChannel.publish.mockReturnValue(true);
       broker.connect();
       await broker.ensureConnected();
 
@@ -288,9 +289,8 @@ describe('Broker', () => {
         },
       });
 
-      const result = broker.publish('my-exchange', { test: 'data' }, 'routing.key');
+      await broker.publish('my-exchange', { test: 'data' }, 'routing.key');
 
-      expect(result).toBe(true);
       expect(mockChannel.publish).toHaveBeenCalledWith(
         'my-exchange',
         'routing.key',
@@ -299,20 +299,21 @@ describe('Broker', () => {
       );
     });
 
-    it('should throw if not connected', () => {
-      expect(() => broker.publish('exchange', {}, '')).toThrow('Not connected');
+    it('should throw if not connected', async () => {
+      await expect(broker.publish('exchange', {}, '')).rejects.toThrow('Not connected');
     });
 
     it('should throw if exchange not declared', async () => {
       broker.connect();
       await broker.ensureConnected();
 
-      expect(() => broker.publish('unknown-exchange', {}, '')).toThrow("Exchange 'unknown-exchange' not declared");
+      await expect(broker.publish('unknown-exchange', {}, '')).rejects.toThrow("Exchange 'unknown-exchange' not declared");
     });
   });
 
   describe('publishesOn', () => {
     it('should create publisher function', async () => {
+      mockChannel.publish.mockReturnValue(true);
       broker.connect();
       await broker.ensureConnected();
 
@@ -324,9 +325,8 @@ describe('Broker', () => {
 
       const publish = broker.publishesOn({ exchange: 'my-exchange', key: 'default.key' });
 
-      const result = publish({ test: 'data' });
+      await publish({ test: 'data' });
 
-      expect(result).toBe(true);
       expect(mockChannel.publish).toHaveBeenCalledWith(
         'my-exchange',
         'default.key',
@@ -336,6 +336,7 @@ describe('Broker', () => {
     });
 
     it('should allow overriding routing key', async () => {
+      mockChannel.publish.mockReturnValue(true);
       broker.connect();
       await broker.ensureConnected();
 
@@ -347,7 +348,7 @@ describe('Broker', () => {
 
       const publish = broker.publishesOn({ exchange: 'my-exchange' });
 
-      publish({ test: 'data' }, 'override.key');
+      await publish({ test: 'data' }, 'override.key');
 
       expect(mockChannel.publish).toHaveBeenCalledWith(
         'my-exchange',
