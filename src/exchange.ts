@@ -196,6 +196,49 @@ export class Exchange {
   }
 
   /**
+   * Republishes an existing message to this exchange, preserving all original
+   * properties (headers, content type, encoding, persistence, etc.).
+   * Only the routing key and explicitly overridden properties change.
+   *
+   * @param original - The raw consumed message (from consumer callback)
+   * @param overrides - Optional property overrides (routingKey, headers, etc.)
+   * @returns true if message was queued, false if buffer full
+   */
+  republish(original: import('./types').RawMessage, overrides: import('./types').RepublishOptions = {}): boolean {
+    const props = original.properties;
+    const routingKey = overrides.routingKey ?? original.fields.routingKey;
+
+    return this.channel.publish(this.name, routingKey, original.content, {
+      persistent: overrides.persistent ?? (props.deliveryMode === 2),
+      contentType: overrides.contentType ?? props.contentType,
+      contentEncoding: overrides.contentEncoding ?? props.contentEncoding,
+      headers: overrides.headers ?? props.headers,
+      expiration: overrides.expiration ?? props.expiration,
+      priority: overrides.priority ?? props.priority,
+      messageId: overrides.messageId ?? props.messageId,
+      correlationId: overrides.correlationId ?? props.correlationId,
+      replyTo: overrides.replyTo ?? props.replyTo,
+      timestamp: overrides.timestamp ?? props.timestamp,
+      userId: overrides.userId ?? props.userId,
+      appId: overrides.appId ?? props.appId,
+    });
+  }
+
+  /**
+   * Async version of republish. Waits for drain if channel buffer is full.
+   *
+   * @param original - The raw consumed message (from consumer callback)
+   * @param overrides - Optional property overrides (routingKey, headers, etc.)
+   */
+  async republishAsync(original: import('./types').RawMessage, overrides: import('./types').RepublishOptions = {}): Promise<void> {
+    const published = this.republish(original, overrides);
+
+    if (! published) {
+      await new Promise<void>(resolve => this.channel.once('drain', resolve));
+    }
+  }
+
+  /**
    * Creates or gets a queue associated with this exchange.
    *
    * @param queueName - Name of the queue

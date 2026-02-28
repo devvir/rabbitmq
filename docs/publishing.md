@@ -203,6 +203,86 @@ app.get('/health', (req, res) => {
 });
 ```
 
+## Republishing Messages
+
+Forward consumed messages to another exchange while preserving all original
+properties (headers, content type, encoding, persistence, etc.). The raw buffer
+is forwarded as-is — no parse/serialize round-trip.
+
+### Basic Republish (Proxy)
+
+Forward a message unchanged:
+
+```typescript
+const targetExchange = broker.getExchange('broadcast');
+
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  targetExchange.republish(original);
+  ack();
+});
+```
+
+All properties are preserved: headers, content type, encoding, persistence,
+priority, expiration, message ID, correlation ID, timestamp, etc.
+
+### Override Routing Key
+
+Forward with a different routing key (all other properties preserved):
+
+```typescript
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  targetExchange.republish(original, {
+    routingKey: 'forwarded.trade',
+  });
+  ack();
+});
+```
+
+### Override Multiple Properties
+
+Selectively override any combination of properties:
+
+```typescript
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  targetExchange.republish(original, {
+    routingKey: 'processed.trade',
+    headers: { ...original.properties.headers, processedAt: Date.now() },
+    priority: 10,
+  });
+  ack();
+});
+```
+
+### Async Republish (Backpressure)
+
+Use `republishAsync` to handle channel backpressure (waits for drain):
+
+```typescript
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  await targetExchange.republishAsync(original, { routingKey: 'new.key' });
+  ack();
+});
+```
+
+### What Gets Preserved
+
+| Property | Default behavior | Override via |
+|----------|------------------|--------------|
+| Content (buffer) | Always preserved (raw bytes) | — |
+| Routing key | Original routing key | `routingKey` |
+| Headers | Original headers | `headers` |
+| Content type | Original content type | `contentType` |
+| Content encoding | Original encoding | `contentEncoding` |
+| Persistent | Original delivery mode | `persistent` |
+| Priority | Original priority | `priority` |
+| Expiration | Original expiration | `expiration` |
+| Message ID | Original message ID | `messageId` |
+| Correlation ID | Original correlation ID | `correlationId` |
+| Reply-to | Original reply-to | `replyTo` |
+| Timestamp | Original timestamp | `timestamp` |
+| User ID | Original user ID | `userId` |
+| App ID | Original app ID | `appId` |
+
 ## Type Safety
 
 Leverage TypeScript for type-safe publishing:

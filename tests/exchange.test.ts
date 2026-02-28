@@ -377,4 +377,245 @@ describe('Exchange', () => {
       expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
     });
   });
+
+  describe('republish', () => {
+    const createRawMessage = (overrides: Record<string, any> = {}) => ({
+      content: Buffer.from('{"data":"test"}'),
+      fields: {
+        deliveryTag: 1,
+        redelivered: false,
+        exchange: 'source-exchange',
+        routingKey: 'original.key',
+        consumerTag: 'ctag',
+        ...overrides.fields,
+      },
+      properties: {
+        contentType: 'application/json',
+        contentEncoding: 'utf-8',
+        headers: { 'x-custom': 'value' },
+        deliveryMode: 2,
+        priority: 5,
+        correlationId: 'corr-123',
+        replyTo: 'reply-queue',
+        expiration: '60000',
+        messageId: 'msg-456',
+        timestamp: 1700000000,
+        userId: undefined,
+        appId: 'test-app',
+        type: undefined,
+        clusterId: undefined,
+        ...overrides.properties,
+      },
+    });
+
+    it('preserves all original properties by default', () => {
+      const rawMsg = createRawMessage();
+
+      exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        {
+          persistent: true,
+          contentType: 'application/json',
+          contentEncoding: 'utf-8',
+          headers: { 'x-custom': 'value' },
+          priority: 5,
+          correlationId: 'corr-123',
+          replyTo: 'reply-queue',
+          expiration: '60000',
+          messageId: 'msg-456',
+          timestamp: 1700000000,
+          userId: undefined,
+          appId: 'test-app',
+        }
+      );
+    });
+
+    it('preserves original routing key when no override', () => {
+      const rawMsg = createRawMessage();
+
+      exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        expect.any(Buffer),
+        expect.any(Object)
+      );
+    });
+
+    it('overrides routing key when specified', () => {
+      const rawMsg = createRawMessage();
+
+      exchange.republish(rawMsg as any, { routingKey: 'new.key' });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'new.key',
+        rawMsg.content,
+        expect.any(Object)
+      );
+    });
+
+    it('overrides headers when specified', () => {
+      const rawMsg = createRawMessage();
+
+      exchange.republish(rawMsg as any, { headers: { replaced: true } });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        expect.objectContaining({
+          headers: { replaced: true },
+        })
+      );
+    });
+
+    it('overrides multiple properties selectively', () => {
+      const rawMsg = createRawMessage();
+
+      exchange.republish(rawMsg as any, {
+        routingKey: 'override.key',
+        priority: 10,
+        expiration: '30000',
+      });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'override.key',
+        rawMsg.content,
+        expect.objectContaining({
+          priority: 10,
+          expiration: '30000',
+          // Original properties still present
+          contentType: 'application/json',
+          headers: { 'x-custom': 'value' },
+          correlationId: 'corr-123',
+        })
+      );
+    });
+
+    it('forwards raw buffer without re-serialization', () => {
+      const binaryContent = Buffer.from([0x00, 0x01, 0x02, 0xff]);
+      const rawMsg = createRawMessage();
+      rawMsg.content = binaryContent;
+
+      exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        binaryContent,
+        expect.any(Object)
+      );
+    });
+
+    it('maps deliveryMode 2 to persistent true', () => {
+      const rawMsg = createRawMessage({ properties: { deliveryMode: 2 } });
+
+      exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        expect.any(String),
+        expect.any(Buffer),
+        expect.objectContaining({ persistent: true })
+      );
+    });
+
+    it('maps deliveryMode 1 to persistent false', () => {
+      const rawMsg = createRawMessage({ properties: { deliveryMode: 1 } });
+
+      exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        expect.any(String),
+        expect.any(Buffer),
+        expect.objectContaining({ persistent: false })
+      );
+    });
+
+    it('allows overriding persistent flag', () => {
+      const rawMsg = createRawMessage({ properties: { deliveryMode: 2 } });
+
+      exchange.republish(rawMsg as any, { persistent: false });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        expect.any(String),
+        expect.any(Buffer),
+        expect.objectContaining({ persistent: false })
+      );
+    });
+
+    it('returns channel publish result', () => {
+      mockChannel.publish.mockReturnValue(false);
+      const rawMsg = createRawMessage();
+
+      const result = exchange.republish(rawMsg as any);
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('republishAsync', () => {
+    const createRawMessage = () => ({
+      content: Buffer.from('{"data":"test"}'),
+      fields: {
+        deliveryTag: 1,
+        redelivered: false,
+        exchange: 'source-exchange',
+        routingKey: 'original.key',
+        consumerTag: 'ctag',
+      },
+      properties: {
+        contentType: 'application/json',
+        contentEncoding: 'utf-8',
+        headers: {},
+        deliveryMode: 2,
+        priority: undefined,
+        correlationId: undefined,
+        replyTo: undefined,
+        expiration: undefined,
+        messageId: undefined,
+        timestamp: undefined,
+        userId: undefined,
+        appId: undefined,
+        type: undefined,
+        clusterId: undefined,
+      },
+    });
+
+    it('resolves immediately when publish succeeds', async () => {
+      mockChannel.publish.mockReturnValue(true);
+      const rawMsg = createRawMessage();
+
+      await exchange.republishAsync(rawMsg as any, { routingKey: 'new.key' });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'new.key',
+        rawMsg.content,
+        expect.any(Object)
+      );
+    });
+
+    it('waits for drain when buffer is full', async () => {
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn().mockImplementation((event: string, cb: () => void) => {
+        setTimeout(cb, 10);
+      });
+
+      const rawMsg = createRawMessage();
+
+      await exchange.republishAsync(rawMsg as any);
+
+      expect(mockChannel.once).toHaveBeenCalledWith('drain', expect.any(Function));
+    });
+  });
 });

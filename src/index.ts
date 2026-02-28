@@ -65,6 +65,7 @@ export type {
   QueueSpec,
   TopologySpec,
   PublishOptions,
+  RepublishOptions,
   PublishConfig,
   ConsumerCallback,
   ConsumerEvent,

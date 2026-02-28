@@ -192,6 +192,40 @@ export interface PublishConfig {
 }
 
 /**
+ * Options for republishing an existing message.
+ * All properties default to the original message's values.
+ * Only specify fields you want to override.
+ */
+export interface RepublishOptions {
+  /** Override the routing key. */
+  routingKey?: string;
+  /** Override or merge headers. */
+  headers?: Record<string, any>;
+  /** Override persistence. */
+  persistent?: boolean;
+  /** Override content type. */
+  contentType?: string;
+  /** Override content encoding. */
+  contentEncoding?: string;
+  /** Override expiration. */
+  expiration?: number | string;
+  /** Override priority. */
+  priority?: number;
+  /** Override message ID. */
+  messageId?: string;
+  /** Override correlation ID. */
+  correlationId?: string;
+  /** Override reply-to. */
+  replyTo?: string;
+  /** Override timestamp. */
+  timestamp?: number;
+  /** Override user ID. */
+  userId?: string;
+  /** Override app ID. */
+  appId?: string;
+}
+
+/**
  * Raw message from amqplib (for reference).
  */
 export type RawMessage = amqp.ConsumeMessage;

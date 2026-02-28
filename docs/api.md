@@ -438,6 +438,45 @@ Publish message to exchange with routing key.
 await exchange.publish('trade.btc', { price: 42500 });
 ```
 
+#### `republish(original: RawMessage, overrides?: RepublishOptions): boolean`
+
+Republish an existing consumed message to this exchange, preserving all original
+properties (headers, content type, encoding, persistence, priority, etc.).
+The raw buffer is forwarded as-is — no serialization/deserialization.
+
+**Parameters:**
+- `original` - The raw consumed message (from consumer callback's `original` field)
+- `overrides` - Optional property overrides
+
+**Returns:** `true` if queued, `false` if channel buffer is full
+
+**Example:**
+```typescript
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  // Forward with all properties preserved, only change routing key
+  exchange.republish(original, { routingKey: 'new.key' });
+  ack();
+});
+```
+
+#### `async republishAsync(original: RawMessage, overrides?: RepublishOptions): Promise<void>`
+
+Async version of `republish()`. Waits for drain if channel buffer is full.
+
+**Parameters:**
+- `original` - The raw consumed message
+- `overrides` - Optional property overrides
+
+**Returns:** Resolves when message is sent (waits for drain if needed)
+
+**Example:**
+```typescript
+await sourceQueue.consume(async (_message, { ack, original }) => {
+  await exchange.republishAsync(original, { routingKey: 'forwarded.key' });
+  ack();
+});
+```
+
 ### Introspection Methods
 
 #### `isDurable(): boolean`
@@ -560,6 +599,30 @@ interface PublishOptions {
   replyTo?: string;            // Queue for responses
   messageId?: string;          // Unique ID
   timestamp?: number;          // Unix timestamp
+}
+```
+
+---
+
+## RepublishOptions
+
+Options for republishing an existing message. All properties default to the original message's values. Only specify fields you want to override:
+
+```typescript
+interface RepublishOptions {
+  routingKey?: string;         // Override routing key
+  headers?: Record<string, any>; // Override headers
+  persistent?: boolean;        // Override persistence
+  contentType?: string;        // Override content type
+  contentEncoding?: string;    // Override content encoding
+  expiration?: number | string; // Override TTL
+  priority?: number;           // Override priority
+  messageId?: string;          // Override message ID
+  correlationId?: string;      // Override correlation ID
+  replyTo?: string;            // Override reply-to
+  timestamp?: number;          // Override timestamp
+  userId?: string;             // Override user ID
+  appId?: string;              // Override app ID
 }
 ```
 
