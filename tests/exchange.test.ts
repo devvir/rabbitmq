@@ -343,6 +343,64 @@ describe('Exchange', () => {
       );
     });
 
+    it('preserves headers from original.properties', async () => {
+      mockChannel.publish.mockReturnValue(true);
+      const rawMsg = createRawMessage();
+      rawMsg.properties.headers = { 'x-trace-id': 'abc123', 'x-source': 'bitmex' };
+
+      await exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        expect.objectContaining({ headers: { 'x-trace-id': 'abc123', 'x-source': 'bitmex' } }),
+      );
+    });
+
+    it('preserves contentType and deliveryMode from original.properties', async () => {
+      mockChannel.publish.mockReturnValue(true);
+      const rawMsg = createRawMessage();
+
+      await exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        expect.objectContaining({ contentType: 'application/json', deliveryMode: 2 }),
+      );
+    });
+
+    it('uses original routing key when none is overridden', async () => {
+      mockChannel.publish.mockReturnValue(true);
+      const rawMsg = createRawMessage();
+
+      await exchange.republish(rawMsg as any);
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        expect.any(Object),
+      );
+    });
+
+    it('override properties take precedence over original.properties', async () => {
+      mockChannel.publish.mockReturnValue(true);
+      const rawMsg = createRawMessage();
+      rawMsg.properties.headers = { original: true };
+
+      await exchange.republish(rawMsg as any, { headers: { overridden: true } });
+
+      expect(mockChannel.publish).toHaveBeenCalledWith(
+        'test-exchange',
+        'original.key',
+        rawMsg.content,
+        expect.objectContaining({ headers: { overridden: true } }),
+      );
+    });
+
     it('waits for drain when buffer is full', async () => {
       mockChannel.publish.mockReturnValue(false);
       mockChannel.once = vi.fn().mockImplementation((event: string, cb: () => void) => {

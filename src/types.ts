@@ -67,6 +67,18 @@ export interface ExchangeSpec {
 }
 
 /**
+ * An exchange-to-exchange binding.
+ */
+export interface ExchangeBinding {
+  /** Source exchange — messages flow out of this exchange. */
+  source: string;
+  /** Destination exchange — messages are forwarded into this exchange. */
+  destination: string;
+  /** Binding key (used for topic/direct sources; ignored by fanout). Default: '' */
+  routingKey?: string;
+}
+
+/**
  * Full topology specification for exchanges and queues.
  */
 export interface TopologySpec {
@@ -82,6 +94,8 @@ export interface TopologySpec {
   queues?: {
     [queueName: string]: QueueSpec;
   };
+  /** Exchange-to-exchange bindings declared after exchanges are asserted. */
+  exchangeBindings?: ExchangeBinding[];
 }
 
 /**

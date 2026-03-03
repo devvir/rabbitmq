@@ -63,6 +63,12 @@ export const declareTopology = async (
       queues.set(queueName, queue);
     }
   }
+
+  if (spec.exchangeBindings) {
+    for (const { source, destination, routingKey = '' } of spec.exchangeBindings) {
+      await channel.bindExchange(destination, source, routingKey);
+    }
+  }
 };
 
 /**

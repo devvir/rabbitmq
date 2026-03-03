@@ -28,6 +28,7 @@ describe('topology', () => {
       assertExchange: vi.fn().mockResolvedValue(undefined),
       assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
       bindQueue: vi.fn().mockResolvedValue(undefined),
+      bindExchange: vi.fn().mockResolvedValue(undefined),
       consume: vi.fn().mockResolvedValue({ consumerTag: 'tag-1' }),
       prefetch: vi.fn().mockResolvedValue(undefined),
       publish: vi.fn().mockReturnValue(true),
@@ -160,6 +161,76 @@ describe('topology', () => {
 
       expect(exchanges.size).toBe(0);
       expect(queues.size).toBe(0);
+    });
+
+    it('should bind exchanges with exchangeBindings', async () => {
+      const exchanges = new Map<string, Exchange>();
+      const queues = new Map<string, Queue>();
+      const spec: TopologySpec = {
+        exchanges: {
+          'ex.src': { type: 'fanout' },
+          'ex.dst': { type: 'fanout' },
+        },
+        exchangeBindings: [
+          { source: 'ex.src', destination: 'ex.dst' },
+        ],
+      };
+
+      await declareTopology(mockChannel, spec, exchanges, queues);
+
+      expect(mockChannel.bindExchange).toHaveBeenCalledWith('ex.dst', 'ex.src', '');
+    });
+
+    it('should bind exchanges with a routing key', async () => {
+      const exchanges = new Map<string, Exchange>();
+      const queues = new Map<string, Queue>();
+      const spec: TopologySpec = {
+        exchanges: {
+          'ex.topic': { type: 'topic' },
+          'ex.fanout': { type: 'fanout' },
+        },
+        exchangeBindings: [
+          { source: 'ex.topic', destination: 'ex.fanout', routingKey: 'trade.*' },
+        ],
+      };
+
+      await declareTopology(mockChannel, spec, exchanges, queues);
+
+      expect(mockChannel.bindExchange).toHaveBeenCalledWith('ex.fanout', 'ex.topic', 'trade.*');
+    });
+
+    it('should declare multiple exchange bindings', async () => {
+      const exchanges = new Map<string, Exchange>();
+      const queues = new Map<string, Queue>();
+      const spec: TopologySpec = {
+        exchanges: {
+          'ex.src': { type: 'fanout' },
+          'ex.a': { type: 'fanout' },
+          'ex.b': { type: 'fanout' },
+        },
+        exchangeBindings: [
+          { source: 'ex.src', destination: 'ex.a' },
+          { source: 'ex.src', destination: 'ex.b' },
+        ],
+      };
+
+      await declareTopology(mockChannel, spec, exchanges, queues);
+
+      expect(mockChannel.bindExchange).toHaveBeenCalledTimes(2);
+      expect(mockChannel.bindExchange).toHaveBeenCalledWith('ex.a', 'ex.src', '');
+      expect(mockChannel.bindExchange).toHaveBeenCalledWith('ex.b', 'ex.src', '');
+    });
+
+    it('should not call bindExchange when exchangeBindings is absent', async () => {
+      const exchanges = new Map<string, Exchange>();
+      const queues = new Map<string, Queue>();
+      const spec: TopologySpec = {
+        exchanges: { 'ex.only': { type: 'fanout' } },
+      };
+
+      await declareTopology(mockChannel, spec, exchanges, queues);
+
+      expect(mockChannel.bindExchange).not.toHaveBeenCalled();
     });
   });
 
