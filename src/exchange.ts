@@ -6,6 +6,8 @@
 import amqp from 'amqplib';
 import { ExchangeSpec, PublishOptions, RawChannel, RawMessage, RepublishOptions } from './types';
 import { Queue } from './queue';
+import { createLogger } from './logger';
+import { MAX_DRAIN_PAUSE_MS } from '.';
 
 /**
  * Represents a RabbitMQ exchange with a simplified API.
@@ -16,6 +18,7 @@ export class Exchange {
   private spec: ExchangeSpec;
   private queues: Map<string, Queue> = new Map();
   private drainPromise: Promise<void> | null = null;
+  private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: ExchangeSpec = {}) {
     this.channel = channel;
@@ -168,9 +171,7 @@ export class Exchange {
       ...otherOptions,
     });
 
-    if (! published) {
-      await this.waitForDrain();
-    }
+    if (! published) await this.waitForDrain();
   }
 
   /**
@@ -183,43 +184,39 @@ export class Exchange {
    * @param overrides - Optional property overrides (routingKey, headers, etc.)
    */
   async republish(original: RawMessage, overrides: RepublishOptions = {}): Promise<void> {
-    const props = original.properties;
-    const routingKey = overrides.routingKey ?? original.fields.routingKey;
+    const { routingKey = original.fields.routingKey, ...optionsOverrides } = overrides;
 
-    const published = this.channel.publish(this.name, routingKey, original.content, {
-      persistent: overrides.persistent ?? (props.deliveryMode === 2),
-      contentType: overrides.contentType ?? props.contentType,
-      contentEncoding: overrides.contentEncoding ?? props.contentEncoding,
-      headers: overrides.headers ?? props.headers,
-      expiration: overrides.expiration ?? props.expiration,
-      priority: overrides.priority ?? props.priority,
-      messageId: overrides.messageId ?? props.messageId,
-      correlationId: overrides.correlationId ?? props.correlationId,
-      replyTo: overrides.replyTo ?? props.replyTo,
-      timestamp: overrides.timestamp ?? props.timestamp,
-      userId: overrides.userId ?? props.userId,
-      appId: overrides.appId ?? props.appId,
+    return this.publish(original.content, routingKey, {
+      ...original.properties,
+      ...optionsOverrides,
     });
-
-    if (! published) {
-      await this.waitForDrain();
-    }
   }
 
   /**
-   * Waits for the channel to drain. Shares a single listener across
-   * all concurrent callers to avoid EventEmitter listener leaks.
+   * Waits for the channel to drain with a safety timeout.
+   * Shares a single listener across all concurrent callers to avoid
+   * EventEmitter listener leaks. If drain doesn't fire within 5 s,
+   * resolves anyway to prevent a deadlock where all prefetch slots
+   * are blocked waiting indefinitely.
    */
   private waitForDrain(): Promise<void> {
-    if (! this.drainPromise) {
-      this.drainPromise = new Promise<void>(resolve => {
-        this.channel.once('drain', () => {
-          this.drainPromise = null;
-          resolve();
-        });
-      });
-    }
-    return this.drainPromise;
+    return this.drainPromise ??= new Promise<void>(resolve => {
+      const timeout = setTimeout(() => {
+        this.channel.removeListener('drain', onDrain);
+        this.drainPromise = null;
+        this.logger.warn('Exchange drain timeout — resolving to prevent deadlock', { exchange: this.name });
+        resolve();
+      }, MAX_DRAIN_PAUSE_MS);
+      timeout.unref();
+
+      const onDrain = () => {
+        clearTimeout(timeout);
+        this.drainPromise = null;
+        resolve();
+      };
+
+      this.channel.once('drain', onDrain);
+    });
   }
 
   /**

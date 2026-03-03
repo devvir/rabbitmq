@@ -2,9 +2,10 @@
  * Queue abstraction for RabbitMQ.
  * Handles queue operations with simplified JS/TS-friendly API.
  */
-
 import amqp from 'amqplib';
+import { createLogger } from './logger';
 import { QueueSpec, PublishOptions, ConsumerCallback, ConsumerEvent, MessageMetadata, RawMessage, RawChannel } from './types';
+import { MAX_DRAIN_PAUSE_MS } from '.';
 
 /**
  * Represents a RabbitMQ queue with a simplified API.
@@ -15,6 +16,7 @@ export class Queue {
   private spec: QueueSpec;
   private consumerTags: Map<string, () => void> = new Map();
   private drainPromise: Promise<void> | null = null;
+  private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: QueueSpec = {}) {
     this.channel = channel;
@@ -200,25 +202,34 @@ export class Queue {
       ...otherOptions,
     });
 
-    if (! published) {
-      await this.waitForDrain();
-    }
+    if (! published) await this.waitForDrain();
   }
 
   /**
-   * Waits for the channel to drain. Shares a single listener across
-   * all concurrent callers to avoid EventEmitter listener leaks.
+   * Waits for the channel to drain with a safety timeout.
+   * Shares a single listener across all concurrent callers to avoid
+   * EventEmitter listener leaks. If drain doesn't fire within 5 s,
+   * resolves anyway to prevent a deadlock where all prefetch slots
+   * are blocked waiting indefinitely.
    */
   private waitForDrain(): Promise<void> {
-    if (! this.drainPromise) {
-      this.drainPromise = new Promise<void>(resolve => {
-        this.channel.once('drain', () => {
-          this.drainPromise = null;
-          resolve();
-        });
-      });
-    }
-    return this.drainPromise;
+    return this.drainPromise ??= new Promise<void>(resolve => {
+      const timeout = setTimeout(() => {
+        this.channel.removeListener('drain', onDrain);
+        this.drainPromise = null;
+        this.logger.warn('Queue drain timeout — resolving to prevent deadlock', { queue: this.name });
+        resolve();
+      }, MAX_DRAIN_PAUSE_MS);
+      timeout.unref();
+
+      const onDrain = () => {
+        clearTimeout(timeout);
+        this.drainPromise = null;
+        resolve();
+      };
+
+      this.channel.once('drain', onDrain);
+    });
   }
 
   /**
