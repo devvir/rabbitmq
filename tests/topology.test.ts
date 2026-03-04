@@ -4,7 +4,7 @@
  */
 
 import { vi } from 'vitest';
-import { declareTopology, recoverTopology, type ConsumerRegistration } from '../src/topology';
+import { declareTopology, recoverTopology } from '../src/topology';
 import { Exchange } from '../src/exchange';
 import { Queue } from '../src/queue';
 import type { TopologySpec } from '../src/types';
@@ -246,7 +246,7 @@ describe('topology', () => {
       const exchanges = new Map([['ex.test', exchange]]);
       const queues = new Map([['q.test', queue]]);
 
-      await recoverTopology(mockChannel, null, exchanges, queues, []);
+      await recoverTopology(mockChannel, null, exchanges, queues);
 
       expect(setExChannelSpy).toHaveBeenCalledWith(mockChannel);
       expect(setQChannelSpy).toHaveBeenCalledWith(mockChannel);
@@ -261,7 +261,7 @@ describe('topology', () => {
         },
       };
 
-      await recoverTopology(mockChannel, spec, exchanges, queues, []);
+      await recoverTopology(mockChannel, spec, exchanges, queues);
 
       expect(mockChannel.assertExchange).toHaveBeenCalled();
       expect(exchanges.has('ex.recover')).toBe(true);
@@ -273,25 +273,22 @@ describe('topology', () => {
       const exchanges = new Map<string, Exchange>();
 
       const callback = vi.fn();
-      const registrations: ConsumerRegistration[] = [
-        { queueName: 'q.consume', callback, options: { prefetch: 10 } },
-      ];
+      await queue.consume(callback, { prefetch: 10 });
 
-      await recoverTopology(mockChannel, null, exchanges, queues, registrations);
+      // Clear call count — only care about calls made during recovery
+      mockChannel.consume.mockClear();
+
+      await recoverTopology(mockChannel, null, exchanges, queues);
 
       expect(mockChannel.consume).toHaveBeenCalled();
     });
 
-    it('should skip consumer registration when queue not found', async () => {
+    it('should not call consume when no queues have registered consumers', async () => {
       const exchanges = new Map<string, Exchange>();
       const queues = new Map<string, Queue>();
 
-      const registrations: ConsumerRegistration[] = [
-        { queueName: 'q.missing', callback: vi.fn(), options: {} },
-      ];
-
       // Should not throw
-      await recoverTopology(mockChannel, null, exchanges, queues, registrations);
+      await recoverTopology(mockChannel, null, exchanges, queues);
 
       expect(mockChannel.consume).not.toHaveBeenCalled();
     });

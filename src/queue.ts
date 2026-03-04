@@ -10,11 +10,14 @@ import { MAX_DRAIN_PAUSE_MS } from '.';
 /**
  * Represents a RabbitMQ queue with a simplified API.
  */
+type ConsumeOptions = { noLocal?: boolean; exclusive?: boolean; prefetch?: number };
+
 export class Queue {
   private channel: RawChannel;
   private name: string;
   private spec: QueueSpec;
-  private consumerTags: Map<string, () => void> = new Map();
+  private consumerTags: Map<string, () => Promise<void>> = new Map();
+  private registrations: Array<{ callback: ConsumerCallback; options: ConsumeOptions }> = [];
   private drainPromise: Promise<void> | null = null;
   private logger = createLogger();
 
@@ -26,9 +29,21 @@ export class Queue {
 
   /**
    * Replaces the underlying channel (used after reconnection).
+   * Clears stale consumer tags — call recoverConsumers() afterwards.
    */
   setChannel(channel: RawChannel): void {
     this.channel = channel;
+    this.consumerTags.clear();
+  }
+
+  /**
+   * Re-registers all consumers on the current channel.
+   * Called after a channel replacement to restore consumer state.
+   */
+  async recoverConsumers(): Promise<void> {
+    for (const { callback, options } of this.registrations) {
+      await this.startConsuming(callback, options);
+    }
   }
 
   /**
@@ -235,6 +250,8 @@ export class Queue {
   /**
    * Consumes messages from the queue.
    * Callback receives message and event object with metadata, ack, nack, and original message.
+   * Registration is tracked internally so the consumer is automatically restored after
+   * a channel drop — no special handling needed at the call site.
    *
    * @param callback - Function to call for each message
    * @param options - Consumer options (prefetch)
@@ -242,18 +259,23 @@ export class Queue {
    */
   async consume(
     callback: ConsumerCallback,
-    options: { noLocal?: boolean; exclusive?: boolean; prefetch?: number } = {}
+    options: ConsumeOptions = {}
+  ): Promise<() => Promise<void>> {
+    this.registrations.push({ callback, options });
+    return this.startConsuming(callback, options);
+  }
+
+  private async startConsuming(
+    callback: ConsumerCallback,
+    options: ConsumeOptions = {}
   ): Promise<() => Promise<void>> {
     const { noLocal = false, exclusive = false, prefetch = 1 } = options;
 
-    // Set prefetch to limit messages in flight
     if (prefetch > 0) {
       await this.channel.prefetch(prefetch);
     }
 
-    const consumerTag = `consumer-${Date.now()}-${Math.random()}`;
-
-    await this.channel.consume(
+    const { consumerTag } = await this.channel.consume(
       this.name,
       (msg) => {
         if (! msg) {
@@ -284,7 +306,7 @@ export class Queue {
     const cancelFn = async () => {
       try {
         await this.channel.cancel(consumerTag);
-      } catch (error) {
+      } catch {
         // May already be cancelled
       }
     };

@@ -6,17 +6,26 @@
  * spec, and for restoring them (plus consumer registrations) after reconnection.
  */
 
-import type { TopologySpec, ConsumerCallback, RawChannel } from './types';
+import type { TopologySpec, QueueSpec, RawChannel } from './types';
 import { Exchange } from './exchange';
 import { Queue } from './queue';
 import { createLogger } from './logger';
 
 const logger = createLogger();
 
-export type ConsumerRegistration = {
-  queueName: string;
-  callback: ConsumerCallback;
-  options: { noLocal?: boolean; exclusive?: boolean; prefetch?: number };
+/** Reuse an existing Queue instance (preserving its consumer registrations) or create a new one. */
+const reuseOrCreate = (
+  queues: Map<string, Queue>,
+  channel: RawChannel,
+  name: string,
+  spec: QueueSpec,
+): Queue => {
+  const existing = queues.get(name);
+  if (existing) {
+    existing.setChannel(channel);
+    return existing;
+  }
+  return new Queue(channel, name, spec);
 };
 
 /**
@@ -37,7 +46,7 @@ export const declareTopology = async (
 
       if (exchangeSpec.queues) {
         for (const [queueName, queueSpec] of Object.entries(exchangeSpec.queues)) {
-          const queue = new Queue(channel, queueName, queueSpec);
+          const queue = reuseOrCreate(queues, channel, queueName, queueSpec);
           await queue.assert();
 
           const routingKeys = queueSpec.routingKey
@@ -58,7 +67,7 @@ export const declareTopology = async (
 
   if (spec.queues) {
     for (const [queueName, queueSpec] of Object.entries(spec.queues)) {
-      const queue = new Queue(channel, queueName, queueSpec);
+      const queue = reuseOrCreate(queues, channel, queueName, queueSpec);
       await queue.assert();
       queues.set(queueName, queue);
     }
@@ -80,23 +89,18 @@ export const recoverTopology = async (
   topologySpec: TopologySpec | null,
   exchanges: Map<string, Exchange>,
   queues: Map<string, Queue>,
-  consumerRegistrations: ConsumerRegistration[],
 ): Promise<void> => {
-  // Point existing instances at the new channel
   for (const exchange of exchanges.values()) exchange.setChannel(channel);
-  for (const queue of queues.values()) queue.setChannel(channel);
 
-  // Re-assert exchanges, queues, bindings
+  // declareTopology reuses existing Queue instances (preserving their consumer registrations)
   if (topologySpec) {
     await declareTopology(channel, topologySpec, exchanges, queues);
+  } else {
+    for (const queue of queues.values()) queue.setChannel(channel);
   }
 
-  // Re-register consumers
-  for (const { queueName, callback, options } of consumerRegistrations) {
-    const queue = queues.get(queueName);
-    if (queue) {
-      await queue.consume(callback, options);
-      logger.info(`Consumer re-registered after recovery`, { queue: queueName });
-    }
+  for (const queue of queues.values()) {
+    await queue.recoverConsumers();
+    logger.info('Consumers recovered after channel drop', { queue: queue.getName() });
   }
 };

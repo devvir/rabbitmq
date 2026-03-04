@@ -22,7 +22,7 @@ import type {
 import { closeConnection, closeChannel } from './connection';
 import { Exchange } from './exchange';
 import { Queue } from './queue';
-import { declareTopology, recoverTopology, type ConsumerRegistration } from './topology';
+import { declareTopology, recoverTopology } from './topology';
 import {
   attemptConnect,
   recoverChannel,
@@ -51,8 +51,6 @@ export class Broker extends EventEmitter {
   /** Stored topology so it can be re-declared after reconnection. */
   private topologySpec: TopologySpec | null = null;
 
-  /** Stored consumer registrations so they can be re-established after reconnection. */
-  private consumerRegistrations: ConsumerRegistration[] = [];
 
   constructor(url: string, options: ConnectionOptions = {}) {
     super();
@@ -279,7 +277,6 @@ export class Broker extends EventEmitter {
     const queue = this.queues.get(queueName);
     if (! queue) throw new Error(`Queue '${queueName}' not declared`);
 
-    this.consumerRegistrations.push({ queueName, callback, options: resolvedOptions });
     return queue.consume(callback, resolvedOptions);
   }
 
@@ -288,7 +285,7 @@ export class Broker extends EventEmitter {
   private get recoveryHooks(): RecoveryHooks {
     return {
       onRecoverTopology: () =>
-        recoverTopology(this.channel!, this.topologySpec, this.exchanges, this.queues, this.consumerRegistrations),
+        recoverTopology(this.channel!, this.topologySpec, this.exchanges, this.queues),
       emit: (event, ...args) => this.emit(event, ...args),
       getReconnectTimer: () => this.reconnectTimer,
       setReconnectTimer: (t) => { this.reconnectTimer = t; },
@@ -296,7 +293,7 @@ export class Broker extends EventEmitter {
   }
 
   private get hasStoredState(): boolean {
-    return this.topologySpec !== null || this.consumerRegistrations.length > 0;
+    return this.topologySpec !== null;
   }
 
   private async doConnect(): Promise<void> {
