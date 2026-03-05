@@ -539,6 +539,71 @@ describe('Broker', () => {
       expect(connection.createChannel).toHaveBeenCalledTimes(2); // initial + recovery
     });
 
+    // Regression: topology re-declaration during recovery previously used this.channel! (null),
+    // causing "Cannot read properties of null (reading 'assertExchange')" and an infinite reconnect loop.
+
+    it('should re-declare topology on the new channel after channel-only recovery', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      await broker.declares({
+        exchanges: { 'live-exchange': { type: 'topic' } },
+      });
+
+      const newChannel = {
+        assertExchange: vi.fn().mockResolvedValue(undefined),
+        assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
+        bindQueue: vi.fn().mockResolvedValue(undefined),
+        setMaxListeners: vi.fn(),
+        on: vi.fn(),
+        once: vi.fn(),
+      };
+      (connection.createChannel as ReturnType<typeof vi.fn>).mockResolvedValue(newChannel);
+
+      // Trigger channel-only close
+      const channelCloseHandlers = (mockChannel.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const channelCloseHandler = channelCloseHandlers[channelCloseHandlers.length - 1]?.[1];
+      channelCloseHandler();
+
+      // Wait for async recovery chain to complete
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Topology must be re-declared using the new channel (never null)
+      expect(newChannel.assertExchange).toHaveBeenCalledWith('live-exchange', 'topic', expect.any(Object));
+    });
+
+    it('should re-declare topology on the new channel after full reconnect', async () => {
+      broker.connect();
+      await broker.ensureConnected();
+
+      await broker.declares({
+        exchanges: { 'live-exchange': { type: 'topic' } },
+      });
+
+      const newChannel = {
+        assertExchange: vi.fn().mockResolvedValue(undefined),
+        assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
+        bindQueue: vi.fn().mockResolvedValue(undefined),
+        setMaxListeners: vi.fn(),
+        on: vi.fn(),
+        once: vi.fn(),
+      };
+      (connection.createChannel as ReturnType<typeof vi.fn>).mockResolvedValue(newChannel);
+
+      // Trigger full connection drop
+      const connCloseHandlers = (mockConnection.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const connCloseHandler = connCloseHandlers[connCloseHandlers.length - 1]?.[1];
+      connCloseHandler();
+
+      // Wait for reconnect timer (retryDelay = 10ms) and async recovery chain
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Topology must be re-declared using the new channel (never null)
+      expect(newChannel.assertExchange).toHaveBeenCalledWith('live-exchange', 'topic', expect.any(Object));
+    });
+
     it('should emit disconnect on connection close', async () => {
       broker.connect();
       await broker.ensureConnected();

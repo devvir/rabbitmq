@@ -70,7 +70,7 @@ describe('recovery', () => {
 
       await attemptConnect('amqp://localhost', {}, true, hooks);
 
-      expect(hooks.onRecoverTopology).toHaveBeenCalled();
+      expect(hooks.onRecoverTopology).toHaveBeenCalledWith(mockChannel);
     });
 
     it('should skip topology recovery when no stored state', async () => {
@@ -111,7 +111,7 @@ describe('recovery', () => {
       const channel = await recoverChannel(mockConnection, hooks);
 
       expect(connection.createChannel).toHaveBeenCalledWith(mockConnection);
-      expect(hooks.onRecoverTopology).toHaveBeenCalled();
+      expect(hooks.onRecoverTopology).toHaveBeenCalledWith(mockChannel);
       expect(channel).toBe(mockChannel);
     });
 

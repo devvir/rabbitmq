@@ -158,8 +158,8 @@ export class Broker extends EventEmitter {
    */
   async close(): Promise<void> {
     logger.info('Closing RabbitMQ broker');
-    await this.disconnect();
     this.state = 'closed';
+    await this.disconnect();
     this.emit('close');
     this.removeAllListeners();
   }
@@ -284,8 +284,8 @@ export class Broker extends EventEmitter {
 
   private get recoveryHooks(): RecoveryHooks {
     return {
-      onRecoverTopology: () =>
-        recoverTopology(this.channel!, this.topologySpec, this.exchanges, this.queues),
+      onRecoverTopology: (channel) =>
+        recoverTopology(channel, this.topologySpec, this.exchanges, this.queues),
       emit: (event, ...args) => this.emit(event, ...args),
       getReconnectTimer: () => this.reconnectTimer,
       setReconnectTimer: (t) => { this.reconnectTimer = t; },

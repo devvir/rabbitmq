@@ -15,7 +15,7 @@ const logger = createLogger();
 /** Callbacks the recovery module invokes on the broker. */
 export type RecoveryHooks = {
   /** Called after a new channel is obtained to restore topology + consumers. */
-  onRecoverTopology: () => Promise<void>;
+  onRecoverTopology: (channel: RawChannel) => Promise<void>;
   /** Emit a broker event. */
   emit: (event: string, ...args: any[]) => void;
   /** Get the current reconnect timer (to avoid duplicate scheduling). */
@@ -40,7 +40,7 @@ export const attemptConnect = async (
   const channel = await createChannel(connection);
 
   if (hasStoredState) {
-    await hooks.onRecoverTopology();
+    await hooks.onRecoverTopology(channel);
   }
 
   return { connection, channel };
@@ -56,7 +56,7 @@ export const recoverChannel = async (
 ): Promise<RawChannel | null> => {
   try {
     const channel = await createChannel(connection);
-    await hooks.onRecoverTopology();
+    await hooks.onRecoverTopology(channel);
     logger.info('Channel recovered on existing connection');
     return channel;
   } catch {
