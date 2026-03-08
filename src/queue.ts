@@ -400,13 +400,28 @@ export class Queue {
    * Parses amqplib message content from buffer to JS value.
    */
   private parseMessageContent(content: Buffer): unknown {
+    const text = content.toString('utf-8');
+
     try {
-      const text = content.toString('utf-8');
-      return JSON.parse(text);
+      return JSON.parse(text, this.bufferReviver);
     } catch (error) {
-      // Return raw string if JSON parsing fails
-      return content.toString('utf-8');
+      this.logger.warn('Failed to parse message content as JSON, returning raw text', {
+        error: (error as Error).message,
+        content: text
+      });
+
+      return text;
     }
+  }
+
+  /**
+   * Reviver function for JSON.parse to recover Buffer objects.
+   */
+  private bufferReviver(_: string, value: unknown): unknown {
+    const isObject = value && typeof value === 'object';
+    const isBuffer = isObject && (value as any).type === 'Buffer' && Array.isArray((value as any).data);
+
+    return isBuffer ? Buffer.from((value as any).data) : value;
   }
 
   /**
