@@ -269,7 +269,7 @@ export class Queue {
     callback: ConsumerCallback,
     options: ConsumeOptions = {}
   ): Promise<() => Promise<void>> {
-    const { noLocal = false, exclusive = false, prefetch = 1 } = options;
+    const { noLocal = false, exclusive = false, prefetch = 0 } = options;
 
     if (prefetch > 0) {
       await this.channel.prefetch(prefetch);
