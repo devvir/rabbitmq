@@ -18,12 +18,22 @@ export class Exchange {
   private spec: ExchangeSpec;
   private queues: Map<string, Queue> = new Map();
   private drainPromise: Promise<void> | null = null;
+  private backpressureHandler: ((paused: boolean) => void) | null = null;
   private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: ExchangeSpec = {}) {
     this.channel = channel;
     this.name = name;
     this.spec = spec;
+  }
+
+  /**
+   * Registers a handler to be notified when publish backpressure starts or ends.
+   * Called with true when the channel write buffer fills (drain pending),
+   * and false when it drains. Use this to pause/resume the upstream data source.
+   */
+  setBackpressureHandler(handler: (paused: boolean) => void): void {
+    this.backpressureHandler = handler;
   }
 
   /**
@@ -201,19 +211,22 @@ export class Exchange {
    */
   private waitForDrain(): Promise<void> {
     return this.drainPromise ??= new Promise<void>(resolve => {
+      this.backpressureHandler?.(true);
+
+      const done = (timedOut: boolean) => {
+        this.drainPromise = null;
+        this.backpressureHandler?.(false);
+        if (timedOut) this.logger.warn('Exchange drain timeout — resolving to prevent deadlock', { exchange: this.name });
+        resolve();
+      };
+
       const timeout = setTimeout(() => {
         this.channel.removeListener('drain', onDrain);
-        this.drainPromise = null;
-        this.logger.warn('Exchange drain timeout — resolving to prevent deadlock', { exchange: this.name });
-        resolve();
+        done(true);
       }, MAX_DRAIN_PAUSE_MS);
       timeout.unref();
 
-      const onDrain = () => {
-        clearTimeout(timeout);
-        this.drainPromise = null;
-        resolve();
-      };
+      const onDrain = () => { clearTimeout(timeout); done(false); };
 
       this.channel.once('drain', onDrain);
     });

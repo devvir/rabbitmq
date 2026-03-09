@@ -4,6 +4,7 @@
 
 import { vi } from 'vitest';
 import { Exchange } from '../src/exchange';
+import { MAX_DRAIN_PAUSE_MS } from '../src/index';
 import { ExchangeSpec } from '../src/types';
 import amqp from 'amqplib';
 
@@ -278,6 +279,82 @@ describe('Exchange', () => {
   });
 
 
+
+  describe('setBackpressureHandler', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('is not called when channel.publish succeeds immediately', async () => {
+      const handler = vi.fn();
+      exchange.setBackpressureHandler(handler);
+
+      mockChannel.publish.mockReturnValue(true);
+
+      await exchange.publish({ data: 1 }, 'key');
+
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('calls handler(true) then handler(false) when drain fires', async () => {
+      const handler = vi.fn();
+      exchange.setBackpressureHandler(handler);
+
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn().mockImplementation((_event: string, cb: () => void) => {
+        setTimeout(cb, 10);
+      });
+
+      await exchange.publish({ data: 1 }, 'key');
+
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(handler).toHaveBeenNthCalledWith(1, true);
+      expect(handler).toHaveBeenNthCalledWith(2, false);
+    });
+
+    it('calls handler(true) then handler(false) when drain times out', async () => {
+      vi.useFakeTimers();
+      const handler = vi.fn();
+      exchange.setBackpressureHandler(handler);
+
+      mockChannel.publish.mockReturnValue(false);
+      mockChannel.once = vi.fn();
+      mockChannel.removeListener = vi.fn();
+
+      const publishPromise = exchange.publish({ data: 1 }, 'key');
+
+      expect(handler).toHaveBeenCalledWith(true);
+
+      vi.advanceTimersByTime(MAX_DRAIN_PAUSE_MS);
+      await publishPromise;
+
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(handler).toHaveBeenNthCalledWith(2, false);
+    });
+
+    it('calls handler(true) exactly once across concurrent publishes, handler(false) once on drain', async () => {
+      const handler = vi.fn();
+      exchange.setBackpressureHandler(handler);
+
+      mockChannel.publish.mockReturnValue(false);
+
+      let drainCallback: (() => void) | undefined;
+      mockChannel.once = vi.fn().mockImplementation((_event: string, cb: () => void) => {
+        drainCallback = cb;
+      });
+
+      const p1 = exchange.publish({ data: 1 }, 'key');
+      const p2 = exchange.publish({ data: 2 }, 'key');
+      const p3 = exchange.publish({ data: 3 }, 'key');
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith(true);
+
+      drainCallback!();
+      await Promise.all([p1, p2, p3]);
+
+      expect(handler).toHaveBeenCalledTimes(2);
+      expect(handler).toHaveBeenLastCalledWith(false);
+    });
+  });
 
   describe('publish', () => {
     it('should resolve immediately when publish succeeds', async () => {
