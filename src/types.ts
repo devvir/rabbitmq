@@ -18,6 +18,11 @@ export interface ConnectionOptions {
   retries?: number;
   /** Delay between retry attempts in milliseconds. Default: 500ms. */
   retryDelay?: number;
+  /**
+   * When true, disables all internal auto-recovery (channel recovery and reconnect scheduling).
+   * Use this when an external system (e.g. service-kit) manages the connection lifecycle.
+   */
+  managed?: boolean;
 }
 
 /**

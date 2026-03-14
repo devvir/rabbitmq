@@ -312,7 +312,13 @@ export class Broker extends EventEmitter {
       this.emit('connect');
     } catch (error) {
       this.lastError = error instanceof Error ? error : new Error(String(error));
-      logger.error('Failed to connect to RabbitMQ', this.lastError);
+
+      if (this.connectionOptions.managed) {
+        logger.debug('Failed to connect to RabbitMQ', { reason: this.lastError.message });
+      } else {
+        logger.error('Failed to connect to RabbitMQ', this.lastError);
+      }
+
       this.handleConnectionFailed();
     }
   }
@@ -325,12 +331,15 @@ export class Broker extends EventEmitter {
   }
 
   private handleConnectionFailed(): void {
-    // Only schedule reconnection for unlimited (-1) retry policies.
-    if (this.connectionOptions.retries === -1) {
+    // Only schedule reconnection for unlimited (-1) retry policies, and only if not managed.
+    if (this.connectionOptions.retries === -1 && ! this.connectionOptions.managed) {
       logger.warn('Connection failed, scheduling reconnect');
       this.triggerReconnect();
     } else {
-      logger.error('Connection failed, max retries exceeded', this.lastError || undefined);
+      if (! this.connectionOptions.managed) {
+        logger.error('Connection failed, max retries exceeded', this.lastError || undefined);
+      }
+
       this.state = 'disconnected';
       this.emit('abort', this.lastError);
     }
@@ -342,14 +351,17 @@ export class Broker extends EventEmitter {
     logger.warn(`RabbitMQ ${source} disconnected`);
     this.channel = null;
 
-    if (source === 'channel' && this.connection) {
+    if (source === 'channel' && this.connection && ! this.connectionOptions.managed) {
       this.state = 'reconnecting';
       this.doRecoverChannel();
     } else {
       this.connection = null;
       this.state = 'disconnected';
       this.emit('disconnect');
-      if (shouldRetry(this.connectionOptions)) this.triggerReconnect();
+
+      if (! this.connectionOptions.managed && shouldRetry(this.connectionOptions)) {
+        this.triggerReconnect();
+      }
     }
   }
 
