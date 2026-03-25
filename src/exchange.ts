@@ -13,11 +13,13 @@ import { MAX_DRAIN_PAUSE_MS } from '.';
  * Represents a RabbitMQ exchange with a simplified API.
  */
 export class Exchange {
-  private channel: RawChannel;
+  private channel: RawChannel | null;
   private name: string;
   private spec: ExchangeSpec;
   private queues: Map<string, Queue> = new Map();
   private drainPromise: Promise<void> | null = null;
+  private channelReadyPromise: Promise<void> | null = null;
+  private channelReadyResolve: (() => void) | null = null;
   private backpressureHandler: ((paused: boolean) => void) | null = null;
   private logger = createLogger();
 
@@ -38,9 +40,26 @@ export class Exchange {
 
   /**
    * Replaces the underlying channel (used after reconnection).
+   * Pass null to mark the exchange as unavailable — publish() will wait until
+   * a live channel is provided.
    */
-  setChannel(channel: RawChannel): void {
-    this.channel = channel;
+  setChannel(channel: RawChannel | null): void {
+    if (channel === null) {
+      if (! this.channelReadyPromise) {
+        this.channelReadyPromise = new Promise<void>(resolve => {
+          this.channelReadyResolve = resolve;
+        });
+      }
+      this.channel = null;
+    } else {
+      this.channel = channel;
+      if (this.channelReadyResolve) {
+        const resolve = this.channelReadyResolve;
+        this.channelReadyPromise = null;
+        this.channelReadyResolve = null;
+        resolve();
+      }
+    }
   }
 
   /**
@@ -150,7 +169,7 @@ export class Exchange {
       exchangeArgs['alternate-exchange'] = alternateExchange;
     }
 
-    await this.channel.assertExchange(this.name, type, {
+    await this.channel!.assertExchange(this.name, type, {
       durable,
       autoDelete,
       arguments: exchangeArgs,
@@ -167,6 +186,8 @@ export class Exchange {
    * @param options - Publishing options
    */
   async publish(message: any, routingKey: string, options: PublishOptions = {}): Promise<void> {
+    if (this.channelReadyPromise) await this.channelReadyPromise;
+
     const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
 
     // If message is already a Buffer, use it directly (don't JSON.stringify)
@@ -174,7 +195,7 @@ export class Exchange {
       ? message
       : Buffer.from(JSON.stringify(message), 'utf-8');
 
-    const published = this.channel.publish(this.name, routingKey, buffer, {
+    const published = this.channel!.publish(this.name, routingKey, buffer, {
       persistent,
       contentType,
       contentEncoding: 'utf-8',
@@ -221,14 +242,14 @@ export class Exchange {
       };
 
       const timeout = setTimeout(() => {
-        this.channel.removeListener('drain', onDrain);
+        this.channel!.removeListener('drain', onDrain);
         done(true);
       }, MAX_DRAIN_PAUSE_MS);
       timeout.unref();
 
       const onDrain = () => { clearTimeout(timeout); done(false); };
 
-      this.channel.once('drain', onDrain);
+      this.channel!.once('drain', onDrain);
     });
   }
 
@@ -241,7 +262,7 @@ export class Exchange {
    * @returns Queue instance
    */
   async createQueue(queueName: string, routingKey: string | string[], spec = {}): Promise<Queue> {
-    const queue = new Queue(this.channel, queueName, spec);
+    const queue = new Queue(this.channel!, queueName, spec);
     await queue.assert();
 
     // Bind to exchange with routing key(s)
@@ -296,14 +317,14 @@ export class Exchange {
    * @returns Promise resolving when exchange is deleted
    */
   async delete(options: { ifUnused?: boolean } = {}): Promise<void> {
-    await this.channel.deleteExchange(this.name, options);
+    await this.channel!.deleteExchange(this.name, options);
   }
 
   /**
    * Gets underlying amqplib channel for advanced operations.
    */
   getChannel(): amqp.Channel {
-    return this.channel;
+    return this.channel!;
   }
 
   /**

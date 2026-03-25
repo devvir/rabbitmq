@@ -675,6 +675,45 @@ describe('Broker', () => {
       expect(disconnectListener).toHaveBeenCalled();
     });
 
+    // Regression: before the fix, publish() on an exchange after a channel drop threw
+    // IllegalOperationError spam because the stale closed channel reference was not nulled out.
+    it('exchange publish() suspends instead of throwing after channel-only drop', async () => {
+      broker = new Broker('amqp://localhost', { retries: -1, retryDelay: 10 });
+      broker.connect();
+      await broker.ensureConnected();
+
+      await broker.declares({
+        exchanges: { 'live-exchange': { type: 'topic' } },
+      });
+
+      const newChannel = {
+        assertExchange: vi.fn().mockResolvedValue(undefined),
+        assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
+        bindQueue: vi.fn().mockResolvedValue(undefined),
+        publish: vi.fn().mockReturnValue(true),
+        setMaxListeners: vi.fn(),
+        on: vi.fn(),
+        once: vi.fn(),
+      };
+      (connection.createChannel as ReturnType<typeof vi.fn>).mockResolvedValue(newChannel);
+
+      // Trigger channel-only drop
+      const channelCloseHandlers = (mockChannel.once as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([event]: [string]) => event === 'close');
+      const channelCloseHandler = channelCloseHandlers[channelCloseHandlers.length - 1]?.[1];
+      channelCloseHandler();
+
+      // Publish while channel is being recovered — must not throw
+      const exchange = broker.getExchange('live-exchange')!;
+      await expect(
+        Promise.race([
+          exchange.publish({ x: 1 }, 'key'),
+          // Give recovery time to complete (retryDelay=10ms + async chain)
+          new Promise<void>(resolve => setTimeout(resolve, 100)),
+        ])
+      ).resolves.not.toThrow();
+    });
+
     it('should ignore disconnect when state is closed', async () => {
       broker.connect();
       await broker.ensureConnected();

@@ -352,6 +352,9 @@ export class Broker extends EventEmitter {
     this.channel = null;
 
     if (source === 'channel' && this.connection && ! this.connectionOptions.managed) {
+      // Null out exchange channels so publish() suspends instead of throwing on
+      // the stale closed channel while the new channel is being recovered.
+      for (const exchange of this.exchanges.values()) exchange.setChannel(null);
       this.state = 'reconnecting';
       this.doRecoverChannel();
     } else {

@@ -276,6 +276,32 @@ describe('Exchange', () => {
       expect(newChannel.publish).toHaveBeenCalled();
       expect(mockChannel.publish).not.toHaveBeenCalled();
     });
+
+    // Regression: before the fix, publish() on a stale closed channel threw
+    // IllegalOperationError spam instead of suspending and recovering.
+    it('suspends publish() when set to null and resumes once a new channel is provided', async () => {
+      const newChannel = {
+        ...mockChannel,
+        publish: vi.fn().mockReturnValue(true),
+      } as any;
+
+      exchange.setChannel(null);
+
+      let resolved = false;
+      const publishPromise = exchange.publish({ test: true }, 'key').then(() => { resolved = true; });
+
+      // Still pending — no channel yet
+      await new Promise(resolve => setImmediate(resolve));
+      expect(resolved).toBe(false);
+      expect(mockChannel.publish).not.toHaveBeenCalled();
+
+      // Provide a new channel — publish should complete
+      exchange.setChannel(newChannel);
+      await publishPromise;
+
+      expect(resolved).toBe(true);
+      expect(newChannel.publish).toHaveBeenCalled();
+    });
   });
 
 

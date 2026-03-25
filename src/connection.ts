@@ -25,7 +25,7 @@ export const connectWithRetries = async (
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const connection = await amqp.connect(url);
+      const connection = await amqp.connect(url, { socketOptions: { timeout: 10000 } });
       return connection;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
