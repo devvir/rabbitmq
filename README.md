@@ -7,10 +7,11 @@ A high-level TypeScript-first wrapper around [amqplib](https://github.com/square
 This library abstracts away AMQP protocol complexity while maintaining flexibility for advanced use cases. It provides:
 
 - **Developer Experience**: Intuitive, declarative API that feels natural in JavaScript/TypeScript
-- **Type Safety**: Full TypeScript support with comprehensive type definitions  
+- **Type Safety**: Full TypeScript support with comprehensive type definitions
 - **Reliability**: Automatic connection management with configurable retry strategies
 - **Simplicity**: Work with JS values (JSON serialization automatic)
 - **Async-first**: All operations return Promises; connections block startup by default
+- **Backpressure**: Pause publishing or consuming when downstream queues exceed configured thresholds
 
 ## Philosophy
 
@@ -101,6 +102,7 @@ await queue.consume(async (message: TradeEvent) => {
 - [Topology & Declarations](./docs/topology.md) - Defining exchanges, queues, bindings
 - [Publishing Messages](./docs/publishing.md) - Sending typed messages with routing
 - [Consuming Messages](./docs/consuming.md) - Setting up message handlers, error handling
+- [Backpressure](./docs/backpressure.md) - Pausing when downstream queues are overwhelmed
 - [API Reference](./docs/api.md) - Complete TypeScript interface documentation
 - [Real-world Examples](./docs/examples.md) - Event streaming, RPC patterns, service integration
 
@@ -110,6 +112,7 @@ The library is organized as modular components:
 
 - `connection.ts` - Low-level connection with retry logic
 - `exchange.ts` - Exchange abstraction and publishing
-- `queue.ts` - Queue abstraction and consuming  
+- `queue.ts` - Queue abstraction and consuming
 - `broker.ts` - Main orchestrator coordinating all components
+- `backpressure.ts` - Management API polling and flow control guard
 - `types.ts` - TypeScript type definitions

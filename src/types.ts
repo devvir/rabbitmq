@@ -106,7 +106,7 @@ export interface TopologySpec {
 /**
  * Options for publishing messages.
  */
-export interface PublishOptions {
+export interface PublishOptions extends BackpressureOptions {
   /** Routing key for topic/headers exchanges. */
   key?: string;
   /** Headers for headers exchange or additional headers. */
@@ -242,6 +242,17 @@ export interface RepublishOptions {
   userId?: string;
   /** Override app ID. */
   appId?: string;
+}
+
+/**
+ * Options for forward pressure control.
+ * When configured, operations pause when watched queues exceed their depth limits.
+ */
+export interface BackpressureOptions {
+  /** Map of queue names to maximum ready + unacknowledged message count. */
+  waitIf?: Record<string, number>;
+  /** Polling interval in seconds. Default: 30. When paused, checks every 3s. */
+  waitCheckInterval?: number;
 }
 
 /**

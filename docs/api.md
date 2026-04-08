@@ -269,7 +269,9 @@ Start consuming messages from the queue.
 **Options:**
 ```typescript
 interface ConsumeOptions {
-  prefetch?: number;  // Max messages in flight (default: 1)
+  prefetch?: number;            // Max messages in flight (default: 1)
+  waitIf?: Record<string, number>;  // pause processing if any watched queue exceeds limit
+  waitCheckInterval?: number;   // depth polling interval in seconds (default: 30)
 }
 ```
 
@@ -584,12 +586,34 @@ if (altExchange) {
 
 ---
 
+## BackpressureOptions
+
+Options for pausing publish or consume operations when downstream queues are overwhelmed.
+Included in both `PublishOptions` and `ConsumeOptions`.
+
+```typescript
+interface BackpressureOptions {
+  waitIf?: Record<string, number>;  // queue name → max ready+unacked message count
+  waitCheckInterval?: number;       // polling interval in seconds (default: 30)
+}
+```
+
+Queue depths are checked via the RabbitMQ management HTTP API (port AMQP+10000 by convention).
+Operations resume when all watched queues drop below 90% of their limits.
+See [Backpressure](./backpressure.md) for details.
+
+---
+
 ## publish Options
 
 Message publishing options (used in `publish()` calls):
 
 ```typescript
 interface PublishOptions {
+  // Backpressure (see BackpressureOptions above)
+  waitIf?: Record<string, number>;  // pause if any watched queue exceeds limit
+  waitCheckInterval?: number;       // depth polling interval in seconds (default: 30)
+
   persistent?: boolean;        // Survive broker restart (default: true)
   contentType?: string;        // MIME type (default: 'application/json')
   contentEncoding?: string;    // Encoding (default: 'utf-8')

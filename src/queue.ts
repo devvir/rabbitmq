@@ -4,21 +4,24 @@
  */
 import amqp from 'amqplib';
 import { createLogger } from './logger';
-import { QueueSpec, PublishOptions, ConsumerCallback, ConsumerEvent, MessageMetadata, RawMessage, RawChannel } from './types';
+import { QueueSpec, PublishOptions, BackpressureOptions, ConsumerCallback, ConsumerEvent, MessageMetadata, RawMessage, RawChannel } from './types';
+import { applyBackpressure, BackpressureGuard } from './backpressure';
 import { MAX_DRAIN_PAUSE_MS } from '.';
 
 /**
  * Represents a RabbitMQ queue with a simplified API.
  */
-type ConsumeOptions = { noLocal?: boolean; exclusive?: boolean; prefetch?: number };
+type ConsumeOptions = { noLocal?: boolean; exclusive?: boolean; prefetch?: number } & BackpressureOptions;
 
 export class Queue {
   private channel: RawChannel;
   private name: string;
   private spec: QueueSpec;
+  private amqpUrl: string | null = null;
   private consumerTags: Map<string, () => Promise<void>> = new Map();
   private registrations: Array<{ callback: ConsumerCallback; options: ConsumeOptions }> = [];
   private drainPromise: Promise<void> | null = null;
+  private backpressureGuard: BackpressureGuard | null = null;
   private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: QueueSpec = {}) {
@@ -34,6 +37,20 @@ export class Queue {
   setChannel(channel: RawChannel): void {
     this.channel = channel;
     this.consumerTags.clear();
+  }
+
+  /** Sets the AMQP URL, enabling self-initialization of backpressure guards. */
+  setAmqpUrl(url: string): void {
+    this.amqpUrl = url;
+  }
+
+  /** Sets a backpressure guard that gates message processing. */
+  setBackpressureGuard(guard: BackpressureGuard): void {
+    this.backpressureGuard = guard;
+  }
+
+  getBackpressureGuard(): BackpressureGuard | null {
+    return this.backpressureGuard;
   }
 
   /**
@@ -269,6 +286,10 @@ export class Queue {
     callback: ConsumerCallback,
     options: ConsumeOptions = {}
   ): Promise<() => Promise<void>> {
+    if (options.waitIf && this.amqpUrl) {
+      applyBackpressure(this, this.amqpUrl, options);
+    }
+
     const { noLocal = false, exclusive = false, prefetch = 0 } = options;
 
     if (prefetch > 0) {
@@ -294,6 +315,7 @@ export class Queue {
         };
 
         Promise.resolve()
+          .then(() => this.backpressureGuard?.wait())
           .then(() => callback(this.parseMessageContent(msg.content), event))
           .catch(() => {
             // If callback throws, nack with requeue

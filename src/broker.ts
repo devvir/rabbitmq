@@ -10,6 +10,7 @@
 
 import { EventEmitter } from 'node:events';
 import type {
+  BackpressureOptions,
   ConnectionOptions,
   TopologySpec,
   PublishOptions,
@@ -132,6 +133,9 @@ export class Broker extends EventEmitter {
       this.reconnectTimer = null;
     }
 
+    for (const ex of this.exchanges.values()) ex.getBackpressureGuard()?.stop();
+    for (const q of this.queues.values()) q.getBackpressureGuard()?.stop();
+
     for (const queue of this.queues.values()) {
       try { await queue.cancelAllConsumers(); } catch { /* already cancelled */ }
     }
@@ -185,6 +189,7 @@ export class Broker extends EventEmitter {
     this.topologySpec = spec;
     await this.ensureConnected();
     await declareTopology(this.channel!, spec, this.exchanges, this.queues);
+    this.setAmqpUrlOnAll();
     return this;
   }
 
@@ -223,10 +228,11 @@ export class Broker extends EventEmitter {
 
     const ex = this.exchanges.get(exchange);
     if (! ex) throw new Error(`Exchange '${exchange}' not declared`);
+
     return ex.publish(message, routingKey, options);
   }
 
-  publishesOn(config: PublishConfig): (message: any, key?: string, options?: PublishOptions) => Promise<void> {
+  publishesOn(config: PublishConfig & BackpressureOptions): (message: any, key?: string, options?: PublishOptions) => Promise<void> {
     const { exchange, key: defaultKey = '', ...publishOptions } = config;
     return (message: any, key = defaultKey, options = {}) =>
       this.publish(exchange, message, key, { ...publishOptions, ...options });
@@ -237,24 +243,24 @@ export class Broker extends EventEmitter {
   async consume(
     queueName: string,
     callback: ConsumerCallback,
-    options?: { prefetch?: number }
+    options?: { prefetch?: number } & BackpressureOptions
   ): Promise<() => Promise<void>>;
 
   async consume(
     callback: ConsumerCallback,
-    options?: { prefetch?: number }
+    options?: { prefetch?: number } & BackpressureOptions
   ): Promise<() => Promise<void>>;
 
   async consume(
     queueNameOrCallback: string | ConsumerCallback,
-    callbackOrOptions: ConsumerCallback | { prefetch?: number } = {},
-    options: { prefetch?: number } = {}
+    callbackOrOptions: ConsumerCallback | ({ prefetch?: number } & BackpressureOptions) = {},
+    options: { prefetch?: number } & BackpressureOptions = {}
   ): Promise<() => Promise<void>> {
     await this.ensureConnected();
 
     let queueName: string;
     let callback: ConsumerCallback;
-    let resolvedOptions: { prefetch?: number };
+    let resolvedOptions: { prefetch?: number } & BackpressureOptions;
 
     if (typeof queueNameOrCallback === 'string') {
       queueName = queueNameOrCallback;
@@ -262,7 +268,7 @@ export class Broker extends EventEmitter {
       resolvedOptions = options;
     } else {
       callback = queueNameOrCallback;
-      resolvedOptions = (callbackOrOptions as { prefetch?: number }) || {};
+      resolvedOptions = (callbackOrOptions as { prefetch?: number } & BackpressureOptions) || {};
 
       if (this.queues.size !== 1) {
         throw new Error(
@@ -282,10 +288,17 @@ export class Broker extends EventEmitter {
 
   // ── Private: connection + recovery ───────────────────────────────────────
 
+  private setAmqpUrlOnAll(): void {
+    for (const ex of this.exchanges.values()) ex.setAmqpUrl(this.url);
+    for (const q of this.queues.values()) q.setAmqpUrl(this.url);
+  }
+
   private get recoveryHooks(): RecoveryHooks {
     return {
-      onRecoverTopology: (channel) =>
-        recoverTopology(channel, this.topologySpec, this.exchanges, this.queues),
+      onRecoverTopology: async (channel) => {
+        await recoverTopology(channel, this.topologySpec, this.exchanges, this.queues);
+        this.setAmqpUrlOnAll();
+      },
       emit: (event, ...args) => this.emit(event, ...args),
       getReconnectTimer: () => this.reconnectTimer,
       setReconnectTimer: (t) => { this.reconnectTimer = t; },

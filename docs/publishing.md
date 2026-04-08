@@ -144,6 +144,25 @@ for (const message of messages) {
 }
 ```
 
+## Backpressure
+
+Pause publishing automatically when downstream queues exceed a depth threshold.
+Pass `waitIf` as a map of queue names to maximum allowed message counts:
+
+```typescript
+await exchange.publish(envelope, routingKey, {
+  waitIf: {
+    codec: 100_000,     // pause if codec queue > 100k messages
+    journalist: 10_000, // pause if journalist queue > 10k messages
+  },
+  waitCheckInterval: 10, // check every 10 seconds (default: 30)
+});
+```
+
+Publishing blocks until all watched queues drop below 90% of their limits.
+The queue depths are checked by polling the RabbitMQ management HTTP API —
+see [Backpressure](./backpressure.md) for setup requirements and tuning.
+
 ## Error Handling
 
 Publishing can fail if not connected or if RabbitMQ rejects the message:

@@ -57,6 +57,31 @@ Higher prefetch = better throughput but more requirements.
 
 Default is `1` (process one at a time).
 
+## Backpressure
+
+Pause message processing automatically when downstream queues exceed a depth threshold.
+Pass `waitIf` as a map of queue names to maximum allowed message counts:
+
+```typescript
+await queue.consume(
+  async (message, { ack }) => {
+    await process(message);
+    ack();
+  },
+  {
+    waitIf: { downstream: 50_000 }, // pause processing if downstream > 50k messages
+    waitCheckInterval: 10,          // check every 10 seconds (default: 30)
+  }
+);
+```
+
+When a watched queue exceeds its threshold, the consumer receives and acknowledges
+messages as normal but delays calling the handler until the queue drains back below
+90% of the limit. This prevents the consumer from outrunning a slower downstream stage.
+
+Queue depths are checked by polling the RabbitMQ management HTTP API —
+see [Backpressure](./backpressure.md) for setup requirements and tuning.
+
 ## Error Handling
 
 Messages are automatically requeued if the handler throws:

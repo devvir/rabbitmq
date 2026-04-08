@@ -5,6 +5,7 @@
 
 import amqp from 'amqplib';
 import { ExchangeSpec, PublishOptions, RawChannel, RawMessage, RepublishOptions } from './types';
+import { applyBackpressure, BackpressureGuard } from './backpressure';
 import { Queue } from './queue';
 import { createLogger } from './logger';
 import { MAX_DRAIN_PAUSE_MS } from '.';
@@ -16,17 +17,24 @@ export class Exchange {
   private channel: RawChannel | null;
   private name: string;
   private spec: ExchangeSpec;
+  private amqpUrl: string | null = null;
   private queues: Map<string, Queue> = new Map();
   private drainPromise: Promise<void> | null = null;
   private channelReadyPromise: Promise<void> | null = null;
   private channelReadyResolve: (() => void) | null = null;
   private backpressureHandler: ((paused: boolean) => void) | null = null;
+  private backpressureGuard: BackpressureGuard | null = null;
   private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: ExchangeSpec = {}) {
     this.channel = channel;
     this.name = name;
     this.spec = spec;
+  }
+
+  /** Sets the AMQP URL, enabling self-initialization of backpressure guards. */
+  setAmqpUrl(url: string): void {
+    this.amqpUrl = url;
   }
 
   /**
@@ -60,6 +68,15 @@ export class Exchange {
         resolve();
       }
     }
+  }
+
+  /** Sets a backpressure guard that gates publishing. */
+  setBackpressureGuard(guard: BackpressureGuard): void {
+    this.backpressureGuard = guard;
+  }
+
+  getBackpressureGuard(): BackpressureGuard | null {
+    return this.backpressureGuard;
   }
 
   /**
@@ -186,6 +203,12 @@ export class Exchange {
    * @param options - Publishing options
    */
   async publish(message: any, routingKey: string, options: PublishOptions = {}): Promise<void> {
+    if (options.waitIf && this.amqpUrl) {
+      await applyBackpressure(this, this.amqpUrl, options);
+    } else if (this.backpressureGuard) {
+      await this.backpressureGuard.wait();
+    }
+
     if (this.channelReadyPromise) await this.channelReadyPromise;
 
     const { persistent = true, contentType = 'application/json', ...otherOptions } = options;
