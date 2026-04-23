@@ -79,4 +79,4 @@ export type {
 } from './types';
 
 // Magic numbers
-export const MAX_DRAIN_PAUSE_MS = 3_000;
+export const MAX_DRAIN_PAUSE_MS = 5_000;

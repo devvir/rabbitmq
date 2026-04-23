@@ -260,7 +260,10 @@ export class Exchange {
       const done = (timedOut: boolean) => {
         this.drainPromise = null;
         this.backpressureHandler?.(false);
-        if (timedOut) this.logger.warn('Exchange drain timeout — resolving to prevent deadlock', { exchange: this.name });
+
+        if (timedOut)
+          this.logger.warn('Exchange drain timeout', { exchange: this.name, timeout: MAX_DRAIN_PAUSE_MS });
+
         resolve();
       };
 
