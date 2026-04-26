@@ -63,6 +63,11 @@ export class Broker extends EventEmitter {
     };
   }
 
+  /** AMQP connection URL — exposed for management-API helpers (drain, etc). */
+  getUrl(): string {
+    return this.url;
+  }
+
   // ── Connection lifecycle ─────────────────────────────────────────────────
 
   /**

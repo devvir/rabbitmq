@@ -46,7 +46,7 @@ export { Broker } from './broker';
 export { connect, keepAlive, connectOrFail } from './factories';
 export { Exchange } from './exchange';
 export { Queue } from './queue';
-export { BackpressureGuard } from './backpressure';
+export { BackpressureGuard, purgeQueues } from './backpressure';
 
 // Connection utilities
 export {

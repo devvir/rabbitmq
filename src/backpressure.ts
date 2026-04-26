@@ -47,6 +47,36 @@ const PAUSE_POLL_MS = 3_000;
 /** Resume when depth drops below 90% of the limit. */
 const RESUME_FACTOR = 0.9;
 
+// ── Queue-purge helper ────────────────────────────────────────────────────────
+
+/**
+ * Discard every ready message in each named queue. Idempotent — purging an
+ * already-empty or non-existent queue is a no-op (404 is swallowed). Issued
+ * via the RabbitMQ management API.
+ *
+ * Used by digger's `POST /set-clock` to drop stale messages produced under
+ * the previous clock position. Sending more old-clock data after a clock
+ * change has been requested serves nobody — purge is the right semantic.
+ *
+ * Note: in-flight unacked messages stay with their consumers; this only
+ * clears the ready (broker-side) buffer. Consumers are responsible for any
+ * in-process state they may need to drop.
+ */
+export async function purgeQueues(amqpUrl: string, queueNames: string[]): Promise<void> {
+  if (queueNames.length === 0) return;
+
+  const { baseUrl, vhost, headers } = deriveManagement(amqpUrl);
+
+  for (const queue of queueNames) {
+    const url = `${baseUrl}/api/queues/${vhost}/${encodeURIComponent(queue)}/contents`;
+    const res = await fetch(url, { method: 'DELETE', headers });
+
+    if (! res.ok && res.status !== 404) {
+      throw new Error(`Management API ${res.status} purging queue "${queue}"`);
+    }
+  }
+}
+
 export interface BackpressureGuardConfig {
   amqpUrl: string;
   waitIf: Record<string, number>;
