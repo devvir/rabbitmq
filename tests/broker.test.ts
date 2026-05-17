@@ -40,6 +40,7 @@ describe('Broker', () => {
       setMaxListeners: vi.fn(),
       on: vi.fn(),
       once: vi.fn(),
+      removeListener: vi.fn(),
     };
 
     mockConnection = {
@@ -694,6 +695,7 @@ describe('Broker', () => {
         setMaxListeners: vi.fn(),
         on: vi.fn(),
         once: vi.fn(),
+        removeListener: vi.fn(),
       };
       (connection.createChannel as ReturnType<typeof vi.fn>).mockResolvedValue(newChannel);
 

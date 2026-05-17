@@ -195,7 +195,15 @@ export class BackpressureGuard {
         }
       }
     } catch (err) {
-      logger.error('Backpressure: check failed', err instanceof Error ? err : new Error(String(err)));
+      const e = err instanceof Error ? err : new Error(String(err));
+      const cause = (e as { cause?: { code?: string; message?: string } }).cause;
+      const causeDetail = cause ? cause.code ?? cause.message ?? String(cause) : undefined;
+
+      logger.error('Backpressure: queue-depth check failed', {
+        error: e.message,
+        cause: causeDetail,
+        managementApi: this.baseUrl,
+      });
     }
 
     this.schedule(this.paused ? PAUSE_POLL_MS : this.normalIntervalMs);

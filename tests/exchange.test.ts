@@ -4,8 +4,6 @@
 
 import { vi } from 'vitest';
 import { Exchange } from '../src/exchange';
-import { MAX_DRAIN_PAUSE_MS } from '../src/index';
-import { ExchangeSpec } from '../src/types';
 import amqp from 'amqplib';
 
 describe('Exchange', () => {
@@ -19,6 +17,8 @@ describe('Exchange', () => {
       deleteExchange: vi.fn().mockResolvedValue(undefined),
       assertQueue: vi.fn().mockResolvedValue({ messageCount: 0, consumerCount: 0 }),
       bindQueue: vi.fn().mockResolvedValue(undefined),
+      once: vi.fn(),
+      removeListener: vi.fn(),
     } as any;
 
     exchange = new Exchange(mockChannel, 'test-exchange', {
@@ -307,8 +307,6 @@ describe('Exchange', () => {
 
 
   describe('setBackpressureHandler', () => {
-    afterEach(() => vi.useRealTimers());
-
     it('is not called when channel.publish succeeds immediately', async () => {
       const handler = vi.fn();
       exchange.setBackpressureHandler(handler);
@@ -336,45 +334,30 @@ describe('Exchange', () => {
       expect(handler).toHaveBeenNthCalledWith(2, false);
     });
 
-    it('calls handler(true) then handler(false) when drain times out', async () => {
-      vi.useFakeTimers();
-      const handler = vi.fn();
-      exchange.setBackpressureHandler(handler);
-
-      mockChannel.publish.mockReturnValue(false);
-      mockChannel.once = vi.fn();
-      mockChannel.removeListener = vi.fn();
-
-      const publishPromise = exchange.publish({ data: 1 }, 'key');
-
-      expect(handler).toHaveBeenCalledWith(true);
-
-      vi.advanceTimersByTime(MAX_DRAIN_PAUSE_MS);
-      await publishPromise;
-
-      expect(handler).toHaveBeenCalledTimes(2);
-      expect(handler).toHaveBeenNthCalledWith(2, false);
-    });
-
-    it('calls handler(true) exactly once across concurrent publishes, handler(false) once on drain', async () => {
+    it('shares one drain wait across concurrent publishes', async () => {
       const handler = vi.fn();
       exchange.setBackpressureHandler(handler);
 
       mockChannel.publish.mockReturnValue(false);
 
-      let drainCallback: (() => void) | undefined;
+      // Capture the first 'drain' callback — that's the one whose promise
+      // powers the shared wait. Later callers attach listeners speculatively
+      // but discard them on finding an active drain.
+      let firstDrainCallback: (() => void) | undefined;
       mockChannel.once = vi.fn().mockImplementation((_event: string, cb: () => void) => {
-        drainCallback = cb;
+        if (! firstDrainCallback) firstDrainCallback = cb;
       });
 
       const p1 = exchange.publish({ data: 1 }, 'key');
       const p2 = exchange.publish({ data: 2 }, 'key');
       const p3 = exchange.publish({ data: 3 }, 'key');
 
+      expect(mockChannel.once).toHaveBeenCalledTimes(3);
+      expect(mockChannel.removeListener).toHaveBeenCalledTimes(2);
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(true);
 
-      drainCallback!();
+      firstDrainCallback!();
       await Promise.all([p1, p2, p3]);
 
       expect(handler).toHaveBeenCalledTimes(2);

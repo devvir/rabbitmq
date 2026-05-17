@@ -18,6 +18,8 @@ describe('Queue', () => {
       unbindQueue: vi.fn().mockResolvedValue(undefined),
       sendToQueue: vi.fn().mockReturnValue(true),
       consume: vi.fn().mockResolvedValue({ consumerTag: 'test-tag' }),
+      once: vi.fn(),
+      removeListener: vi.fn(),
       ack: vi.fn(),
       nack: vi.fn(),
       reject: vi.fn(),

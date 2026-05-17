@@ -6,7 +6,7 @@ import amqp from 'amqplib';
 import { createLogger } from './logger';
 import { QueueSpec, PublishOptions, BackpressureOptions, ConsumerCallback, ConsumerEvent, MessageMetadata, RawMessage, RawChannel } from './types';
 import { applyBackpressure, BackpressureGuard } from './backpressure';
-import { MAX_DRAIN_PAUSE_MS } from '.';
+import { publishWithDrainControl } from './drain';
 
 /**
  * Represents a RabbitMQ queue with a simplified API.
@@ -20,7 +20,6 @@ export class Queue {
   private amqpUrl: string | null = null;
   private consumerTags: Map<string, () => Promise<void>> = new Map();
   private registrations: Array<{ callback: ConsumerCallback; options: ConsumeOptions }> = [];
-  private drainPromise: Promise<void> | null = null;
   private backpressureGuard: BackpressureGuard | null = null;
   private logger = createLogger();
 
@@ -227,41 +226,15 @@ export class Queue {
       ? message
       : Buffer.from(JSON.stringify(message), 'utf-8');
 
-    const published = this.channel.sendToQueue(this.name, buffer, {
-      persistent,
-      contentType,
-      contentEncoding: 'utf-8',
-      ...otherOptions,
-    });
-
-    if (! published) await this.waitForDrain();
-  }
-
-  /**
-   * Waits for the channel to drain with a safety timeout.
-   * Shares a single listener across all concurrent callers to avoid
-   * EventEmitter listener leaks. If drain doesn't fire within 5 s,
-   * resolves anyway to prevent a deadlock where all prefetch slots
-   * are blocked waiting indefinitely.
-   */
-  private waitForDrain(): Promise<void> {
-    return this.drainPromise ??= new Promise<void>(resolve => {
-      const timeout = setTimeout(() => {
-        this.channel.removeListener('drain', onDrain);
-        this.drainPromise = null;
-        this.logger.warn('Queue drain timeout — resolving to prevent deadlock', { queue: this.name });
-        resolve();
-      }, MAX_DRAIN_PAUSE_MS);
-      timeout.unref();
-
-      const onDrain = () => {
-        clearTimeout(timeout);
-        this.drainPromise = null;
-        resolve();
-      };
-
-      this.channel.once('drain', onDrain);
-    });
+    await publishWithDrainControl(
+      this.channel,
+      () => this.channel.sendToQueue(this.name, buffer, {
+        persistent,
+        contentType,
+        contentEncoding: 'utf-8',
+        ...otherOptions,
+      })
+    );
   }
 
   /**

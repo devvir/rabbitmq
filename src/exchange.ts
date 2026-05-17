@@ -7,8 +7,7 @@ import amqp from 'amqplib';
 import { ExchangeSpec, PublishOptions, RawChannel, RawMessage, RepublishOptions } from './types';
 import { applyBackpressure, BackpressureGuard } from './backpressure';
 import { Queue } from './queue';
-import { createLogger } from './logger';
-import { MAX_DRAIN_PAUSE_MS } from '.';
+import { publishWithDrainControl } from './drain';
 
 /**
  * Represents a RabbitMQ exchange with a simplified API.
@@ -19,12 +18,10 @@ export class Exchange {
   private spec: ExchangeSpec;
   private amqpUrl: string | null = null;
   private queues: Map<string, Queue> = new Map();
-  private drainPromise: Promise<void> | null = null;
   private channelReadyPromise: Promise<void> | null = null;
   private channelReadyResolve: (() => void) | null = null;
   private backpressureHandler: ((paused: boolean) => void) | null = null;
   private backpressureGuard: BackpressureGuard | null = null;
-  private logger = createLogger();
 
   constructor(channel: RawChannel, name: string, spec: ExchangeSpec = {}) {
     this.channel = channel;
@@ -218,14 +215,16 @@ export class Exchange {
       ? message
       : Buffer.from(JSON.stringify(message), 'utf-8');
 
-    const published = this.channel!.publish(this.name, routingKey, buffer, {
-      persistent,
-      contentType,
-      contentEncoding: 'utf-8',
-      ...otherOptions,
-    });
-
-    if (! published) await this.waitForDrain();
+    await publishWithDrainControl(
+      this.channel!,
+      () => this.channel!.publish(this.name, routingKey, buffer, {
+        persistent,
+        contentType,
+        contentEncoding: 'utf-8',
+        ...otherOptions,
+      }),
+      this.backpressureHandler ?? undefined
+    );
   }
 
   /**
@@ -243,39 +242,6 @@ export class Exchange {
     return this.publish(original.content, routingKey, {
       ...original.properties,
       ...optionsOverrides,
-    });
-  }
-
-  /**
-   * Waits for the channel to drain with a safety timeout.
-   * Shares a single listener across all concurrent callers to avoid
-   * EventEmitter listener leaks. If drain doesn't fire within 5 s,
-   * resolves anyway to prevent a deadlock where all prefetch slots
-   * are blocked waiting indefinitely.
-   */
-  private waitForDrain(): Promise<void> {
-    return this.drainPromise ??= new Promise<void>(resolve => {
-      this.backpressureHandler?.(true);
-
-      const done = (timedOut: boolean) => {
-        this.drainPromise = null;
-        this.backpressureHandler?.(false);
-
-        if (timedOut)
-          this.logger.warn('Exchange drain timeout', { exchange: this.name, timeout: MAX_DRAIN_PAUSE_MS });
-
-        resolve();
-      };
-
-      const timeout = setTimeout(() => {
-        this.channel!.removeListener('drain', onDrain);
-        done(true);
-      }, MAX_DRAIN_PAUSE_MS);
-      timeout.unref();
-
-      const onDrain = () => { clearTimeout(timeout); done(false); };
-
-      this.channel!.once('drain', onDrain);
     });
   }
 
